@@ -48,6 +48,9 @@ class ThermalView @JvmOverloads constructor(
     /** Callback invoked with the touch temperature whenever the user taps. */
     var onTouchTemp: ((Float) -> Unit)? = null
 
+    /** Read-only access to the last frame for diagnostics. */
+    val lastFramePublic: ParsedFrame? get() = lastFrame
+
     // ── Private state ────────────────────────────────────────────────────────
 
     private val sensorW = 160

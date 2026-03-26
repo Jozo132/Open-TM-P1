@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settingsPanelRoot"
+    android:layout_width="320dp"
+    android:layout_height="match_parent"
+    android:background="@drawable/panel_bg"
+    android:orientation="vertical"
+    android:clickable="true"
+    android:focusable="true">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="12dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/settings_title"
+            style="@style/PanelTitle" />
+
+        <ImageButton
+            android:id="@+id/btnCloseSettings"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_close"
+            android:contentDescription="@string/cd_close"
+            android:padding="8dp"
+            android:scaleType="fitCenter" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@drawable/divider_horizontal" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <!-- Colormap Section -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_colormap"
+                style="@style/PanelSectionHeader"
+                android:layout_marginBottom="12dp" />
+
+            <RadioGroup
+                android:id="@+id/rgColormap"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <RadioButton
+                    android:id="@+id/rbIronbow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Ironbow"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:buttonTint="@color/accent"
+                    android:paddingStart="8dp"
+                    android:minHeight="40dp" />
+
+                <RadioButton
+                    android:id="@+id/rbRainbow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Rainbow"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:buttonTint="@color/accent"
+                    android:paddingStart="8dp"
+                    android:minHeight="40dp" />
+
+                <RadioButton
+                    android:id="@+id/rbGrayscale"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Grayscale"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:buttonTint="@color/accent"
+                    android:paddingStart="8dp"
+                    android:minHeight="40dp" />
+
+                <RadioButton
+                    android:id="@+id/rbHot"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Hot"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:buttonTint="@color/accent"
+                    android:paddingStart="8dp"
+                    android:minHeight="40dp" />
+
+                <RadioButton
+                    android:id="@+id/rbPlasma"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Plasma"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:buttonTint="@color/accent"
+                    android:paddingStart="8dp"
+                    android:minHeight="40dp" />
+            </RadioGroup>
+
+            <!-- Divider -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@drawable/divider_horizontal"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Overlays Section -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_overlays"
+                style="@style/PanelSectionHeader"
+                android:layout_marginBottom="12dp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swReticule"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_show_reticule"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:minHeight="48dp"
+                android:checked="true" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swMinMax"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_show_minmax"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:minHeight="48dp"
+                android:checked="true" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swColorbar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_show_colorbar"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:minHeight="48dp"
+                android:checked="true" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swTempHud"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_show_temp_hud"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:minHeight="48dp"
+                android:checked="true" />
+
+            <!-- Divider -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@drawable/divider_horizontal"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Image Section -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_image"
+                style="@style/PanelSectionHeader"
+                android:layout_marginBottom="12dp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swAutoRange"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_auto_range"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:minHeight="48dp"
+                android:checked="true" />
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

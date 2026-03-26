@@ -6,7 +6,9 @@
     android:layout_height="match_parent"
     android:background="@color/colorBackground">
 
-    <!-- Thermal camera view fills the screen -->
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         LAYER 1: Thermal camera view (fills the screen)
+         ═══════════════════════════════════════════════════════════════════════ -->
     <com.github.opentmp1.ui.ThermalView
         android:id="@+id/thermalView"
         android:layout_width="0dp"
@@ -16,116 +18,453 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- Status message shown when not streaming -->
-    <TextView
-        android:id="@+id/tvStatus"
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         LAYER 2: Status overlay (shown when not streaming)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:id="@+id/statusOverlay"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:background="@color/overlay_bg"
-        android:padding="12dp"
-        android:textColor="@color/temp_text"
-        android:textSize="16sp"
-        android:text="@string/camera_not_found"
+        android:background="@drawable/pill_bg"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:paddingTop="24dp"
+        android:paddingBottom="24dp"
         android:visibility="visible"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageView
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginBottom="12dp"
+            android:src="@drawable/ic_videocam"
+            android:alpha="0.5" />
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/camera_not_found"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:fontFamily="sans-serif-medium" />
+
+        <TextView
+            android:id="@+id/tvStatusHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/camera_not_found_hint"
+            android:textColor="@color/text_tertiary"
+            android:textSize="12sp"
+            android:layout_marginTop="4dp"
+            android:gravity="center" />
+    </LinearLayout>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         LAYER 3: Top info bar
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@color/overlay_bg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <!-- Status dot -->
+        <View
+            android:id="@+id/statusDot"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/status_indicator_disconnected" />
+
+        <!-- Camera model -->
+        <TextView
+            android:id="@+id/tvCameraModel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/camera_model"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:fontFamily="sans-serif-medium" />
+
+        <!-- Separator -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="•"
+            android:textColor="@color/text_tertiary"
+            android:textSize="14sp" />
+
+        <!-- Resolution + FPS -->
+        <TextView
+            android:id="@+id/tvResolutionFps"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/camera_resolution"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="•"
+            android:textColor="@color/text_tertiary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvFps"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="@string/camera_fps"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif" />
+
+        <!-- Spacer -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Recording indicator -->
+        <TextView
+            android:id="@+id/tvRecording"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/pill_bg"
+            android:drawableStart="@drawable/status_indicator_recording"
+            android:drawablePadding="6dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:text="REC"
+            android:textColor="#FFFF3333"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-medium"
+            android:visibility="gone" />
+
+        <!-- Settings button -->
+        <ImageButton
+            android:id="@+id/btnSettings"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_settings"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_settings" />
+
+        <!-- Diagnostics button -->
+        <ImageButton
+            android:id="@+id/btnDiagnostics"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_diagnostics"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_info" />
+    </LinearLayout>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         LAYER 4: Temperature HUD (top-left, below top bar)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:id="@+id/tempHud"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/pill_bg"
+        android:orientation="vertical"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="8dp"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/topBar">
+
+        <!-- Large center temp -->
+        <TextView
+            android:id="@+id/tvCenterLarge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/center_temp_value"
+            style="@style/HudTempLarge" />
+
+        <!-- Min / Max / Touch row -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="2dp">
+
+            <TextView
+                android:id="@+id/tvMin"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="↓ --.-°C"
+                android:textColor="@color/temp_min"
+                style="@style/HudTempSmall" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="  "
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvMax"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="↑ --.-°C"
+                android:textColor="@color/temp_max"
+                style="@style/HudTempSmall" />
+        </LinearLayout>
+
+        <!-- Touch temp (shown when user taps) -->
+        <TextView
+            android:id="@+id/tvTouch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⊕ --.-°C"
+            android:textColor="@color/temp_touch"
+            android:layout_marginTop="2dp"
+            android:visibility="gone"
+            style="@style/HudTempSmall" />
+    </LinearLayout>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         LAYER 5: Quick settings sidebar (right side)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:id="@+id/quickSettings"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:layout_marginEnd="8dp"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <!-- Calibrate / NUC button -->
+        <ImageButton
+            android:id="@+id/btnQuickCalibrate"
+            style="@style/QuickButton"
+            android:contentDescription="@string/cd_calibration"
+            android:src="@drawable/ic_calibrate"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Gain toggle -->
+        <ImageButton
+            android:id="@+id/btnQuickGain"
+            style="@style/QuickButton"
+            android:contentDescription="@string/cd_gain"
+            android:src="@drawable/ic_exposure"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Colormap cycle -->
+        <ImageButton
+            android:id="@+id/btnQuickColormap"
+            style="@style/QuickButton"
+            android:contentDescription="@string/cd_colormap"
+            android:src="@drawable/ic_palette"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Gallery / last screenshot -->
+        <ImageButton
+            android:id="@+id/btnQuickGallery"
+            style="@style/QuickButton"
+            android:contentDescription="Gallery"
+            android:src="@drawable/ic_gallery" />
+    </LinearLayout>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         LAYER 6: Bottom camera bar
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@color/overlay_bg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="20dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <!-- Left side: Mode selector -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <!-- Gain label -->
+            <TextView
+                android:id="@+id/tvGainLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="HIGH"
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.1" />
+
+            <!-- Colormap label -->
+            <TextView
+                android:id="@+id/tvColormapLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Ironbow"
+                android:textColor="@color/text_tertiary"
+                android:textSize="10sp"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+
+        <!-- Center: Capture button -->
+        <FrameLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center">
+
+            <ImageButton
+                android:id="@+id/btnCapture"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:background="@drawable/capture_button_photo"
+                android:contentDescription="@string/cd_capture"
+                android:scaleType="center" />
+        </FrameLayout>
+
+        <!-- Right side: Mode toggle -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <!-- Photo/Video mode toggle -->
+            <LinearLayout
+                android:id="@+id/modeToggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/mode_selector_bg"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:padding="3dp">
+
+                <TextView
+                    android:id="@+id/tvModePhoto"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/mode_tab_active"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="@string/mode_photo"
+                    android:textColor="@color/colorBackground"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-medium" />
+
+                <TextView
+                    android:id="@+id/tvModeVideo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="@string/mode_video"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-medium" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         LAYER 7: Slide-in panels (right-aligned overlays)
+         ═══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Dim backdrop when panel is open -->
+    <View
+        android:id="@+id/panelDimBackdrop"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#66000000"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- Temperature info bar (top-left) -->
-    <LinearLayout
-        android:id="@+id/tempInfoLayout"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:background="@color/overlay_bg"
-        android:orientation="vertical"
-        android:padding="8dp"
+    <!-- Settings panel -->
+    <include
+        android:id="@+id/settingsPanel"
+        layout="@layout/panel_settings"
+        android:layout_width="320dp"
+        android:layout_height="0dp"
         android:visibility="gone"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
-
-        <TextView
-            android:id="@+id/tvCenter"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/center_temp"
-            android:textColor="@color/temp_text"
-            android:textSize="13sp" />
-
-        <TextView
-            android:id="@+id/tvMin"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/min_temp"
-            android:textColor="#FF44AAFF"
-            android:textSize="13sp" />
-
-        <TextView
-            android:id="@+id/tvMax"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/max_temp"
-            android:textColor="#FFFF4444"
-            android:textSize="13sp" />
-
-        <TextView
-            android:id="@+id/tvTouch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/touch_temp"
-            android:textColor="#FFFFDD00"
-            android:textSize="13sp" />
-    </LinearLayout>
-
-    <!-- Control toolbar (bottom, always visible) -->
-    <LinearLayout
-        android:id="@+id/controlBar"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:background="@color/overlay_bg"
-        android:gravity="center"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        android:visibility="visible"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
+        app:layout_constraintTop_toTopOf="parent" />
 
-        <Button
-            android:id="@+id/btnShutter"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_margin="4dp"
-            android:layout_weight="1"
-            android:text="@string/btn_shutter"
-            android:textSize="11sp" />
+    <!-- Calibration panel -->
+    <include
+        android:id="@+id/calibrationPanel"
+        layout="@layout/panel_calibration"
+        android:layout_width="320dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-        <Button
-            android:id="@+id/btnGain"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_margin="4dp"
-            android:layout_weight="1.5"
-            android:text="@string/btn_gain"
-            android:textSize="11sp" />
-
-        <Button
-            android:id="@+id/btnColormap"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_margin="4dp"
-            android:layout_weight="1.5"
-            android:text="@string/btn_colormap"
-            android:textSize="11sp" />
-
-        <Button
-            android:id="@+id/btnScreenshot"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_margin="4dp"
-            android:layout_weight="1.5"
-            android:text="@string/btn_screenshot"
-            android:textSize="11sp" />
-    </LinearLayout>
+    <!-- Diagnostics panel -->
+    <include
+        android:id="@+id/diagnosticsPanel"
+        layout="@layout/panel_diagnostics"
+        android:layout_width="320dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
