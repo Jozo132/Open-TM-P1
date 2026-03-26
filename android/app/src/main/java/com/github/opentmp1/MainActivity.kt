@@ -12,10 +12,13 @@ import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.github.opentmp1.camera.FrameParser
@@ -51,7 +54,20 @@ class MainActivity : AppCompatActivity() {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var streamJob: Job? = null
 
+    // ── State ────────────────────────────────────────────────────────────────
     private var gainHigh = true
+    private var videoMode = false
+    private var isRecording = false
+
+    // ── Diagnostics tracking ─────────────────────────────────────────────────
+    private var frameCount = 0L
+    private var droppedFrames = 0L
+    private var streamStartTime = 0L
+    private var lastFpsTime = 0L
+    private var fpsFrameCount = 0
+    private var currentFps = 0f
+    private var lastCalibrationTime: String? = null
+    private var connectedDevice: UsbDevice? = null
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -72,7 +88,11 @@ class MainActivity : AppCompatActivity() {
 
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
 
-        setupButtons()
+        setupCameraControls()
+        setupTopBar()
+        setupBottomBar()
+        setupQuickSettings()
+        setupPanels()
         registerUsbReceiver()
 
         // If launched by USB_DEVICE_ATTACHED, the device is in the intent
@@ -120,6 +140,7 @@ class MainActivity : AppCompatActivity() {
                     val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
                     if (device != null && isP1Camera(device)) {
                         stopStreaming()
+                        connectedDevice = null
                         showStatus(getString(R.string.disconnected))
                     }
                 }
@@ -171,18 +192,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun startCamera(device: UsbDevice) {
         stopStreaming()
+        connectedDevice = device
         showStatus(getString(R.string.connecting))
+        updateStatusDot(StatusState.CONNECTING)
 
         scope.launch {
             val newDriver = ThermalCameraDriver(usbManager, device)
             try {
                 withContext(Dispatchers.IO) { newDriver.connect() }
                 driver = newDriver
+                resetDiagnostics()
                 showStreaming(true)
                 launchStreamLoop(newDriver)
             } catch (e: Exception) {
                 Log.e(TAG, "Camera connect failed", e)
                 showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
+                updateStatusDot(StatusState.ERROR)
             }
         }
     }
@@ -191,17 +216,32 @@ class MainActivity : AppCompatActivity() {
         streamJob = scope.launch(Dispatchers.IO) {
             while (isActive && d.isStreaming()) {
                 try {
-                    val rawFrame = d.readFrame() ?: continue
+                    val rawFrame = d.readFrame()
+                    if (rawFrame == null) {
+                        droppedFrames++
+                        continue
+                    }
                     val frame = FrameParser.parse(rawFrame)
+                    frameCount++
+                    fpsFrameCount++
+
+                    // Calculate FPS every second
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastFpsTime >= 1000) {
+                        currentFps = fpsFrameCount * 1000f / (now - lastFpsTime)
+                        fpsFrameCount = 0
+                        lastFpsTime = now
+                    }
 
                     withContext(Dispatchers.Main) {
                         binding.thermalView.updateFrame(frame)
-                        binding.tvCenter.text = "Center: ${FrameParser.formatTemp(frame.centerTemp())}"
-                        binding.tvMin.text    = "Min: ${FrameParser.formatTemp(frame.minTemp())}"
-                        binding.tvMax.text    = "Max: ${FrameParser.formatTemp(frame.maxTemp())}"
+                        updateTemperatureHud(frame)
+                        updateFpsDisplay()
+                        updateDiagnosticsIfVisible()
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Frame read error", e)
+                    droppedFrames++
                     delay(100)
                 }
             }
@@ -216,74 +256,442 @@ class MainActivity : AppCompatActivity() {
         showStreaming(false)
     }
 
-    // ── UI helpers ────────────────────────────────────────────────────────────
+    private fun resetDiagnostics() {
+        frameCount = 0
+        droppedFrames = 0
+        fpsFrameCount = 0
+        currentFps = 0f
+        streamStartTime = SystemClock.elapsedRealtime()
+        lastFpsTime = streamStartTime
+    }
 
-    private fun setupButtons() {
-        binding.btnShutter.setOnClickListener {
-            scope.launch(Dispatchers.IO) {
-                driver?.triggerShutter()
-                withContext(Dispatchers.Main) {
-                    toast(getString(R.string.shutter_triggered))
-                }
-            }
-        }
+    // ── UI setup ──────────────────────────────────────────────────────────────
 
-        binding.btnGain.setOnClickListener {
-            gainHigh = !gainHigh
-            val isHigh = gainHigh
-            val label = if (isHigh) getString(R.string.gain_high) else getString(R.string.gain_low)
-            scope.launch(Dispatchers.IO) {
-                if (isHigh) driver?.setGainHigh() else driver?.setGainLow()
-                withContext(Dispatchers.Main) {
-                    binding.btnGain.text = if (isHigh) "Gain: High" else "Gain: Low"
-                    toast(label)
-                }
-            }
-        }
-
-        binding.btnColormap.setOnClickListener {
-            binding.thermalView.colormap = ColormapManager.next(binding.thermalView.colormap)
-            binding.btnColormap.text = binding.thermalView.colormap.displayName
-        }
-
-        binding.btnScreenshot.setOnClickListener {
-            saveScreenshot()
-        }
-
-        // Touch temperature display
+    private fun setupCameraControls() {
         binding.thermalView.onTouchTemp = { temp ->
-            binding.tvTouch.text = "Touch: ${FrameParser.formatTemp(temp)}"
+            binding.tvTouch.text = "⊕ ${FrameParser.formatTemp(temp)}"
+            binding.tvTouch.visibility = View.VISIBLE
         }
     }
 
+    private fun setupTopBar() {
+        binding.btnSettings.setOnClickListener { togglePanel(Panel.SETTINGS) }
+        binding.btnDiagnostics.setOnClickListener { togglePanel(Panel.DIAGNOSTICS) }
+    }
+
+    private fun setupBottomBar() {
+        // Capture button
+        binding.btnCapture.setOnClickListener {
+            if (videoMode) {
+                toggleRecording()
+            } else {
+                saveScreenshot()
+            }
+        }
+
+        // Mode toggle
+        binding.tvModePhoto.setOnClickListener { setMode(false) }
+        binding.tvModeVideo.setOnClickListener { setMode(true) }
+    }
+
+    private fun setupQuickSettings() {
+        binding.btnQuickCalibrate.setOnClickListener {
+            scope.launch(Dispatchers.IO) {
+                driver?.triggerShutter()
+                withContext(Dispatchers.Main) {
+                    lastCalibrationTime = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                    toast(getString(R.string.shutter_triggered))
+                    updateCalibrationPanel()
+                }
+            }
+        }
+
+        binding.btnQuickGain.setOnClickListener {
+            toggleGain()
+        }
+
+        binding.btnQuickColormap.setOnClickListener {
+            cycleColormap()
+        }
+
+        binding.btnQuickGallery.setOnClickListener {
+            // Placeholder: could open gallery intent
+            toast("Gallery")
+        }
+    }
+
+    private fun setupPanels() {
+        // Dim backdrop closes all panels
+        binding.panelDimBackdrop.setOnClickListener { closeAllPanels() }
+
+        // Settings panel
+        binding.settingsPanel.btnCloseSettings.setOnClickListener { closeAllPanels() }
+        setupSettingsPanel()
+
+        // Calibration panel
+        binding.calibrationPanel.btnCloseCalibration.setOnClickListener { closeAllPanels() }
+        setupCalibrationPanel()
+
+        // Diagnostics panel
+        binding.diagnosticsPanel.btnCloseDiagnostics.setOnClickListener { closeAllPanels() }
+    }
+
+    private fun setupSettingsPanel() {
+        // Colormap radio group
+        binding.settingsPanel.rbIronbow.isChecked = true
+        binding.settingsPanel.rgColormap.setOnCheckedChangeListener { _, checkedId ->
+            val colormap = when (checkedId) {
+                R.id.rbIronbow -> ColormapManager.Colormap.IRONBOW
+                R.id.rbRainbow -> ColormapManager.Colormap.RAINBOW
+                R.id.rbGrayscale -> ColormapManager.Colormap.GRAYSCALE
+                R.id.rbHot -> ColormapManager.Colormap.HOT
+                R.id.rbPlasma -> ColormapManager.Colormap.PLASMA
+                else -> return@setOnCheckedChangeListener
+            }
+            binding.thermalView.colormap = colormap
+            binding.tvColormapLabel.text = colormap.displayName
+        }
+
+        // Overlay switches
+        binding.settingsPanel.swReticule.setOnCheckedChangeListener { _, checked ->
+            binding.thermalView.showReticule = checked
+        }
+        binding.settingsPanel.swMinMax.setOnCheckedChangeListener { _, checked ->
+            binding.thermalView.showMinMax = checked
+        }
+        binding.settingsPanel.swColorbar.setOnCheckedChangeListener { _, checked ->
+            binding.thermalView.showColorbar = checked
+        }
+        binding.settingsPanel.swTempHud.setOnCheckedChangeListener { _, checked ->
+            binding.tempHud.visibility = if (checked && driver?.isStreaming() == true) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun setupCalibrationPanel() {
+        binding.calibrationPanel.btnTriggerNuc.setOnClickListener {
+            scope.launch(Dispatchers.IO) {
+                driver?.triggerShutter()
+                withContext(Dispatchers.Main) {
+                    lastCalibrationTime = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                    toast(getString(R.string.shutter_triggered))
+                    updateCalibrationPanel()
+                }
+            }
+        }
+
+        binding.calibrationPanel.btnToggleGain.setOnClickListener {
+            toggleGain()
+            updateCalibrationPanel()
+        }
+    }
+
+    // ── Mode switching ────────────────────────────────────────────────────────
+
+    private fun setMode(isVideo: Boolean) {
+        videoMode = isVideo
+        if (isVideo) {
+            binding.tvModePhoto.background = null
+            binding.tvModePhoto.setTextColor(getColor(R.color.text_secondary))
+            binding.tvModeVideo.setBackgroundResource(R.drawable.mode_tab_active)
+            binding.tvModeVideo.setTextColor(getColor(R.color.colorBackground))
+            binding.btnCapture.setBackgroundResource(
+                if (isRecording) R.drawable.capture_button_recording
+                else R.drawable.capture_button_video
+            )
+        } else {
+            binding.tvModeVideo.background = null
+            binding.tvModeVideo.setTextColor(getColor(R.color.text_secondary))
+            binding.tvModePhoto.setBackgroundResource(R.drawable.mode_tab_active)
+            binding.tvModePhoto.setTextColor(getColor(R.color.colorBackground))
+            binding.btnCapture.setBackgroundResource(R.drawable.capture_button_photo)
+            if (isRecording) {
+                stopRecording()
+            }
+        }
+    }
+
+    private fun toggleRecording() {
+        if (isRecording) {
+            stopRecording()
+        } else {
+            startRecording()
+        }
+    }
+
+    private fun startRecording() {
+        isRecording = true
+        binding.tvRecording.visibility = View.VISIBLE
+        binding.btnCapture.setBackgroundResource(R.drawable.capture_button_recording)
+        toast(getString(R.string.recording_started))
+        // Video recording implementation is a placeholder — thermal video
+        // encoding requires MediaCodec which depends on the device's codec
+        // capabilities. The UI is fully wired; encoding can be added later.
+    }
+
+    private fun stopRecording() {
+        isRecording = false
+        binding.tvRecording.visibility = View.GONE
+        binding.btnCapture.setBackgroundResource(
+            if (videoMode) R.drawable.capture_button_video
+            else R.drawable.capture_button_photo
+        )
+        toast(getString(R.string.recording_stopped))
+    }
+
+    // ── Gain & colormap ──────────────────────────────────────────────────────
+
+    private fun toggleGain() {
+        gainHigh = !gainHigh
+        val isHigh = gainHigh
+        scope.launch(Dispatchers.IO) {
+            if (isHigh) driver?.setGainHigh() else driver?.setGainLow()
+            withContext(Dispatchers.Main) {
+                binding.tvGainLabel.text = if (isHigh) "HIGH" else "LOW"
+                toast(if (isHigh) getString(R.string.gain_high) else getString(R.string.gain_low))
+                updateCalibrationPanel()
+            }
+        }
+    }
+
+    private fun cycleColormap() {
+        val next = ColormapManager.next(binding.thermalView.colormap)
+        binding.thermalView.colormap = next
+        binding.tvColormapLabel.text = next.displayName
+        // Sync radio button in settings panel
+        val rbId = when (next) {
+            ColormapManager.Colormap.IRONBOW -> R.id.rbIronbow
+            ColormapManager.Colormap.RAINBOW -> R.id.rbRainbow
+            ColormapManager.Colormap.GRAYSCALE -> R.id.rbGrayscale
+            ColormapManager.Colormap.HOT -> R.id.rbHot
+            ColormapManager.Colormap.PLASMA -> R.id.rbPlasma
+        }
+        binding.settingsPanel.rgColormap.check(rbId)
+    }
+
+    // ── Panel management ─────────────────────────────────────────────────────
+
+    private enum class Panel { SETTINGS, CALIBRATION, DIAGNOSTICS }
+    private var openPanel: Panel? = null
+
+    private fun togglePanel(panel: Panel) {
+        if (openPanel == panel) {
+            closeAllPanels()
+        } else {
+            openPanel(panel)
+        }
+    }
+
+    private fun openPanel(panel: Panel) {
+        closeAllPanels(animate = false)
+        openPanel = panel
+
+        binding.panelDimBackdrop.visibility = View.VISIBLE
+        binding.panelDimBackdrop.alpha = 0f
+        binding.panelDimBackdrop.animate().alpha(1f).setDuration(200).start()
+
+        val panelView = when (panel) {
+            Panel.SETTINGS -> {
+                syncSettingsPanel()
+                binding.settingsPanel.root
+            }
+            Panel.CALIBRATION -> {
+                updateCalibrationPanel()
+                binding.calibrationPanel.root
+            }
+            Panel.DIAGNOSTICS -> {
+                updateDiagnosticsPanel()
+                binding.diagnosticsPanel.root
+            }
+        }
+
+        panelView.visibility = View.VISIBLE
+        panelView.translationX = panelView.width.toFloat().coerceAtLeast(320f)
+        panelView.animate()
+            .translationX(0f)
+            .setDuration(250)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun closeAllPanels(animate: Boolean = true) {
+        openPanel = null
+
+        if (animate) {
+            binding.panelDimBackdrop.animate().alpha(0f).setDuration(200).withEndAction {
+                binding.panelDimBackdrop.visibility = View.GONE
+            }.start()
+
+            animatePanelClose(binding.settingsPanel.root)
+            animatePanelClose(binding.calibrationPanel.root)
+            animatePanelClose(binding.diagnosticsPanel.root)
+        } else {
+            binding.panelDimBackdrop.visibility = View.GONE
+            binding.settingsPanel.root.visibility = View.GONE
+            binding.calibrationPanel.root.visibility = View.GONE
+            binding.diagnosticsPanel.root.visibility = View.GONE
+        }
+    }
+
+    private fun animatePanelClose(view: View) {
+        if (view.visibility != View.VISIBLE) return
+        view.animate()
+            .translationX(view.width.toFloat().coerceAtLeast(320f))
+            .setDuration(200)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction { view.visibility = View.GONE }
+            .start()
+    }
+
+    // ── Panel content sync ───────────────────────────────────────────────────
+
+    private fun syncSettingsPanel() {
+        val rbId = when (binding.thermalView.colormap) {
+            ColormapManager.Colormap.IRONBOW -> R.id.rbIronbow
+            ColormapManager.Colormap.RAINBOW -> R.id.rbRainbow
+            ColormapManager.Colormap.GRAYSCALE -> R.id.rbGrayscale
+            ColormapManager.Colormap.HOT -> R.id.rbHot
+            ColormapManager.Colormap.PLASMA -> R.id.rbPlasma
+        }
+        binding.settingsPanel.rgColormap.check(rbId)
+        binding.settingsPanel.swReticule.isChecked = binding.thermalView.showReticule
+        binding.settingsPanel.swMinMax.isChecked = binding.thermalView.showMinMax
+        binding.settingsPanel.swColorbar.isChecked = binding.thermalView.showColorbar
+    }
+
+    private fun updateCalibrationPanel() {
+        val gainText = if (gainHigh) getString(R.string.settings_gain_high) else getString(R.string.settings_gain_low)
+        binding.calibrationPanel.tvCurrentGain.text = getString(R.string.calibration_current_gain, gainText)
+        binding.calibrationPanel.btnToggleGain.text =
+            if (gainHigh) getString(R.string.calibration_switch_low) else getString(R.string.calibration_switch_high)
+        binding.calibrationPanel.tvLastCalibration.text =
+            lastCalibrationTime ?: getString(R.string.calibration_never)
+
+        val hasCamera = driver?.isStreaming() == true
+        binding.calibrationPanel.btnTriggerNuc.isEnabled = hasCamera
+        binding.calibrationPanel.btnTriggerNuc.alpha = if (hasCamera) 1.0f else 0.4f
+        binding.calibrationPanel.btnToggleGain.isEnabled = hasCamera
+        binding.calibrationPanel.btnToggleGain.alpha = if (hasCamera) 1.0f else 0.4f
+    }
+
+    private fun updateDiagnosticsPanel() {
+        val device = connectedDevice
+        val streaming = driver?.isStreaming() == true
+
+        // Connection
+        binding.diagnosticsPanel.tvDiagStatus.text = when {
+            streaming -> getString(R.string.streaming)
+            device != null -> getString(R.string.connecting)
+            else -> getString(R.string.diagnostics_not_connected)
+        }
+        binding.diagnosticsPanel.tvDiagStatus.setTextColor(
+            getColor(when {
+                streaming -> R.color.status_ok
+                device != null -> R.color.status_connecting
+                else -> R.color.status_error
+            })
+        )
+
+        if (device != null) {
+            binding.diagnosticsPanel.tvDiagUsbDevice.text = device.deviceName
+            binding.diagnosticsPanel.tvDiagVidPid.text = "0x%04X / 0x%04X".format(device.vendorId, device.productId)
+            binding.diagnosticsPanel.tvDiagInterface.text = "USB 2.0 Bulk"
+        } else {
+            binding.diagnosticsPanel.tvDiagUsbDevice.text = getString(R.string.diagnostics_na)
+            binding.diagnosticsPanel.tvDiagVidPid.text = getString(R.string.diagnostics_na)
+            binding.diagnosticsPanel.tvDiagInterface.text = getString(R.string.diagnostics_na)
+        }
+
+        // Performance
+        binding.diagnosticsPanel.tvDiagFps.text = if (streaming) "%.1f fps".format(currentFps) else getString(R.string.diagnostics_na)
+        binding.diagnosticsPanel.tvDiagFrameCount.text = "%,d".format(frameCount)
+        binding.diagnosticsPanel.tvDiagDropped.text = "%,d".format(droppedFrames)
+        binding.diagnosticsPanel.tvDiagUptime.text = if (streaming) formatUptime() else getString(R.string.diagnostics_na)
+
+        // Temperature
+        val frame = binding.thermalView.lastFramePublic
+        if (frame != null) {
+            binding.diagnosticsPanel.tvDiagSceneRange.text =
+                "${FrameParser.formatTemp(frame.minTemp())} – ${FrameParser.formatTemp(frame.maxTemp())}"
+            binding.diagnosticsPanel.tvDiagCenter.text = FrameParser.formatTemp(frame.centerTemp())
+        }
+    }
+
+    private fun updateDiagnosticsIfVisible() {
+        if (openPanel == Panel.DIAGNOSTICS) {
+            updateDiagnosticsPanel()
+        }
+    }
+
+    // ── UI state management ──────────────────────────────────────────────────
+
+    private enum class StatusState { CONNECTED, DISCONNECTED, CONNECTING, ERROR }
+
+    private fun updateStatusDot(state: StatusState) {
+        val dotBg = when (state) {
+            StatusState.CONNECTED -> R.drawable.status_indicator_connected
+            StatusState.DISCONNECTED -> R.drawable.status_indicator_disconnected
+            StatusState.CONNECTING -> R.drawable.status_indicator_connecting
+            StatusState.ERROR -> R.drawable.status_indicator_disconnected
+        }
+        binding.statusDot.setBackgroundResource(dotBg)
+    }
+
     private fun showStatus(message: String, error: Boolean = false) {
-        binding.tvStatus.visibility = View.VISIBLE
+        binding.statusOverlay.visibility = View.VISIBLE
         binding.tvStatus.text = message
         binding.tvStatus.setTextColor(
-            if (error) getColor(R.color.status_error) else getColor(R.color.status_connecting)
+            if (error) getColor(R.color.status_error) else getColor(R.color.text_primary)
         )
-        binding.tempInfoLayout.visibility = View.GONE
-        setCameraButtonsEnabled(false)
+        binding.tvStatusHint.visibility = if (error) View.GONE else View.VISIBLE
+        binding.tempHud.visibility = View.GONE
+        binding.quickSettings.visibility = View.GONE
+        updateStatusDot(if (error) StatusState.ERROR else StatusState.DISCONNECTED)
+        setCameraControlsEnabled(false)
     }
 
     private fun showStreaming(active: Boolean) {
         if (active) {
-            binding.tvStatus.visibility = View.GONE
-            binding.tempInfoLayout.visibility = View.VISIBLE
-            setCameraButtonsEnabled(true)
+            binding.statusOverlay.visibility = View.GONE
+            binding.tempHud.visibility = if (binding.settingsPanel.swTempHud.isChecked) View.VISIBLE else View.GONE
+            binding.quickSettings.visibility = View.VISIBLE
+            updateStatusDot(StatusState.CONNECTED)
+            setCameraControlsEnabled(true)
         } else {
-            binding.tempInfoLayout.visibility = View.GONE
-            setCameraButtonsEnabled(false)
+            binding.tempHud.visibility = View.GONE
+            binding.quickSettings.visibility = View.GONE
+            setCameraControlsEnabled(false)
         }
     }
 
-    private fun setCameraButtonsEnabled(enabled: Boolean) {
-        binding.btnShutter.isEnabled = enabled
-        binding.btnGain.isEnabled = enabled
-        binding.btnScreenshot.isEnabled = enabled
-        binding.btnShutter.alpha = if (enabled) 1.0f else 0.4f
-        binding.btnGain.alpha = if (enabled) 1.0f else 0.4f
-        binding.btnScreenshot.alpha = if (enabled) 1.0f else 0.4f
+    private fun setCameraControlsEnabled(enabled: Boolean) {
+        binding.btnCapture.isEnabled = enabled
+        binding.btnCapture.alpha = if (enabled) 1.0f else 0.4f
+        binding.btnQuickCalibrate.isEnabled = enabled
+        binding.btnQuickCalibrate.alpha = if (enabled) 1.0f else 0.4f
+        binding.btnQuickGain.isEnabled = enabled
+        binding.btnQuickGain.alpha = if (enabled) 1.0f else 0.4f
+        binding.btnQuickColormap.isEnabled = enabled
+        binding.btnQuickColormap.alpha = if (enabled) 1.0f else 0.4f
+    }
+
+    // ── Temperature & FPS display ────────────────────────────────────────────
+
+    private fun updateTemperatureHud(frame: com.github.opentmp1.camera.ParsedFrame) {
+        binding.tvCenterLarge.text = FrameParser.formatTemp(frame.centerTemp())
+        binding.tvMin.text = "↓ ${FrameParser.formatTemp(frame.minTemp())}"
+        binding.tvMax.text = "↑ ${FrameParser.formatTemp(frame.maxTemp())}"
+    }
+
+    private fun updateFpsDisplay() {
+        binding.tvFps.text = "%.0f fps".format(currentFps)
+    }
+
+    private fun formatUptime(): String {
+        val elapsed = (SystemClock.elapsedRealtime() - streamStartTime) / 1000
+        val h = elapsed / 3600
+        val m = (elapsed % 3600) / 60
+        val s = elapsed % 60
+        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
     }
 
     private fun toast(msg: String) {
@@ -296,6 +704,10 @@ class MainActivity : AppCompatActivity() {
         val bmp = binding.thermalView.captureBitmap()
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val fileName = "ThermalP1_$stamp.png"
+
+        // Flash effect
+        binding.thermalView.alpha = 0.5f
+        binding.thermalView.animate().alpha(1.0f).setDuration(200).start()
 
         scope.launch(Dispatchers.IO) {
             val success = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
