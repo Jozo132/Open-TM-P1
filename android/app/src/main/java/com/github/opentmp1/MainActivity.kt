@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private var gainHigh = true
     private var videoMode = false
     private var isRecording = false
+    private var showTempHud = true
 
     // ── Diagnostics tracking ─────────────────────────────────────────────────
     private var frameCount = 0L
@@ -68,6 +69,8 @@ class MainActivity : AppCompatActivity() {
     private var currentFps = 0f
     private var lastCalibrationTime: String? = null
     private var connectedDevice: UsbDevice? = null
+
+    private val timeFormatter = SimpleDateFormat("HH:mm:ss", Locale.US)
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -299,7 +302,7 @@ class MainActivity : AppCompatActivity() {
             scope.launch(Dispatchers.IO) {
                 driver?.triggerShutter()
                 withContext(Dispatchers.Main) {
-                    lastCalibrationTime = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                    lastCalibrationTime = timeFormatter.format(Date())
                     toast(getString(R.string.shutter_triggered))
                     updateCalibrationPanel()
                 }
@@ -363,6 +366,7 @@ class MainActivity : AppCompatActivity() {
             binding.thermalView.showColorbar = checked
         }
         binding.settingsPanel.swTempHud.setOnCheckedChangeListener { _, checked ->
+            showTempHud = checked
             binding.tempHud.visibility = if (checked && driver?.isStreaming() == true) View.VISIBLE else View.GONE
         }
     }
@@ -372,7 +376,7 @@ class MainActivity : AppCompatActivity() {
             scope.launch(Dispatchers.IO) {
                 driver?.triggerShutter()
                 withContext(Dispatchers.Main) {
-                    lastCalibrationTime = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                    lastCalibrationTime = timeFormatter.format(Date())
                     toast(getString(R.string.shutter_triggered))
                     updateCalibrationPanel()
                 }
@@ -419,13 +423,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startRecording() {
-        isRecording = true
-        binding.tvRecording.visibility = View.VISIBLE
-        binding.btnCapture.setBackgroundResource(R.drawable.capture_button_recording)
-        toast(getString(R.string.recording_started))
-        // Video recording implementation is a placeholder — thermal video
-        // encoding requires MediaCodec which depends on the device's codec
-        // capabilities. The UI is fully wired; encoding can be added later.
+        // Video recording requires MediaCodec encoding of thermal frames.
+        // The UI is fully wired; actual encoding will be added in a future update.
+        toast(getString(R.string.recording_not_available))
     }
 
     private fun stopRecording() {
@@ -435,7 +435,6 @@ class MainActivity : AppCompatActivity() {
             if (videoMode) R.drawable.capture_button_video
             else R.drawable.capture_button_photo
         )
-        toast(getString(R.string.recording_stopped))
     }
 
     // ── Gain & colormap ──────────────────────────────────────────────────────
@@ -505,7 +504,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         panelView.visibility = View.VISIBLE
-        panelView.translationX = panelView.width.toFloat().coerceAtLeast(320f)
+        val panelWidth = resources.getDimension(R.dimen.panel_width)
+        panelView.translationX = panelView.width.toFloat().coerceAtLeast(panelWidth)
         panelView.animate()
             .translationX(0f)
             .setDuration(250)
@@ -534,8 +534,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun animatePanelClose(view: View) {
         if (view.visibility != View.VISIBLE) return
+        val panelWidth = resources.getDimension(R.dimen.panel_width)
         view.animate()
-            .translationX(view.width.toFloat().coerceAtLeast(320f))
+            .translationX(view.width.toFloat().coerceAtLeast(panelWidth))
             .setDuration(200)
             .setInterpolator(AccelerateInterpolator())
             .withEndAction { view.visibility = View.GONE }
@@ -652,7 +653,7 @@ class MainActivity : AppCompatActivity() {
     private fun showStreaming(active: Boolean) {
         if (active) {
             binding.statusOverlay.visibility = View.GONE
-            binding.tempHud.visibility = if (binding.settingsPanel.swTempHud.isChecked) View.VISIBLE else View.GONE
+            binding.tempHud.visibility = if (showTempHud) View.VISIBLE else View.GONE
             binding.quickSettings.visibility = View.VISIBLE
             updateStatusDot(StatusState.CONNECTED)
             setCameraControlsEnabled(true)

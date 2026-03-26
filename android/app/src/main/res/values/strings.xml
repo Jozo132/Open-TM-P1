@@ -44,6 +44,7 @@
     <string name="recording_started">Recording started</string>
     <string name="recording_stopped">Recording saved to Gallery</string>
     <string name="recording_failed">Recording failed</string>
+    <string name="recording_not_available">Video recording coming soon</string>
 
     <!-- Settings panel -->
     <string name="settings_title">Settings</string>
