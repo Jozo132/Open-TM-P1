@@ -73,6 +73,9 @@ class ThermalCameraDriver(
 
         // Bulk endpoint address (IN)
         private const val ENDPOINT_IN = 0x81
+
+        /** Number of consecutive frame read failures before auto-disconnect. */
+        const val MAX_CONSECUTIVE_ERRORS = 10
     }
 
     private var connection: UsbDeviceConnection? = null
@@ -83,22 +86,45 @@ class ThermalCameraDriver(
 
     @Volatile private var streaming = false
 
+    /** Tracks consecutive frame read failures for auto-disconnect. */
+    @Volatile var consecutiveErrors = 0
+        private set
+
     /**
      * Open the USB connection and run the full initialization sequence.
      * Must be called from a background thread.
+     *
+     * @throws UsbConnectionException with a descriptive message on failure.
      */
     fun connect() {
         Log.i(TAG, "Connecting to P1 camera…")
 
-        connection = usbManager.openDevice(device)
-            ?: throw IllegalStateException("Could not open USB device")
+        // Phase 1: Open the USB device
+        try {
+            connection = usbManager.openDevice(device)
+        } catch (e: SecurityException) {
+            throw UsbConnectionException("USB permission was revoked or denied", e)
+        } catch (e: Exception) {
+            throw UsbConnectionException("Failed to open USB device: ${e.message}", e)
+        }
+        if (connection == null) {
+            throw UsbConnectionException(
+                "Could not open USB device. " +
+                "The device may be in use by another app or the USB connection is unstable."
+            )
+        }
 
-        // Locate interfaces and alternate settings
+        // Phase 2: Locate interfaces and alternate settings
         iface0 = null
         iface1Alt0 = null
         iface1Alt1 = null
+        bulkIn = null
+
+        Log.d(TAG, "Device has ${device.interfaceCount} interface(s)")
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
+            Log.d(TAG, "  Interface ${iface.id} alt=${iface.alternateSetting} " +
+                    "endpoints=${iface.endpointCount}")
             when {
                 iface.id == 0 -> iface0 = iface
                 iface.id == 1 && iface.alternateSetting == 0 -> iface1Alt0 = iface
@@ -118,20 +144,63 @@ class ThermalCameraDriver(
             }
         }
 
-        val conn = connection!!
+        // Validate that all required interfaces were found
+        if (iface0 == null) {
+            throw UsbConnectionException(
+                "USB device does not have the expected interface layout (Interface 0 missing). " +
+                "The camera firmware may be incompatible."
+            )
+        }
+        if (iface1Alt0 == null) {
+            throw UsbConnectionException(
+                "USB device is missing Interface 1 alt-setting 0. " +
+                "The camera firmware may be incompatible."
+            )
+        }
+        if (iface1Alt1 == null || bulkIn == null) {
+            throw UsbConnectionException(
+                "USB device is missing the streaming interface (Interface 1 alt-setting 1) " +
+                "or its bulk IN endpoint. The camera firmware may be incompatible."
+            )
+        }
 
-        // Claim both interfaces
-        conn.claimInterface(iface0 ?: error("Interface 0 not found"), true)
-        val alt0 = iface1Alt0 ?: error("Interface 1 alt-0 not found")
-        conn.claimInterface(alt0, true)
+        val conn = connection ?: throw UsbConnectionException(
+            "USB connection was lost before initialization could complete"
+        )
 
-        // Initialization sequence (mirrors the desktop Python driver)
-        initSequence(conn)
+        // Phase 3: Claim interfaces
+        try {
+            if (!conn.claimInterface(iface0, true)) {
+                throw UsbConnectionException(
+                    "Failed to claim USB control interface. " +
+                    "Another app may be using the camera."
+                )
+            }
+            if (!conn.claimInterface(iface1Alt0, true)) {
+                throw UsbConnectionException(
+                    "Failed to claim USB streaming interface. " +
+                    "Another app may be using the camera."
+                )
+            }
+        } catch (e: Exception) {
+            if (e is UsbConnectionException) throw e
+            throw UsbConnectionException("Failed to claim USB interfaces: ${e.message}", e)
+        }
+
+        // Phase 4: Run initialization sequence
+        try {
+            initSequence(conn)
+        } catch (e: Exception) {
+            if (e is UsbConnectionException) throw e
+            throw UsbConnectionException(
+                "Camera initialization failed: ${e.message}", e
+            )
+        }
     }
 
     private fun initSequence(conn: UsbDeviceConnection) {
-        // 1. Read device name
-        sendCommand(conn, CMD_START_STREAM)  // initial start stream
+        // 1. Send initial start-stream command
+        sendCommand(conn, CMD_START_STREAM)
         readStatus(conn)
         val resp1 = readResponse(conn, 1)
         readStatus(conn)
@@ -141,9 +210,26 @@ class ThermalCameraDriver(
         Thread.sleep(1000)
 
         // 3. Enable streaming interface (alt setting 1)
-        val alt1 = iface1Alt1 ?: error("Interface 1 alt-1 not found")
-        conn.setInterface(alt1)
-        conn.controlTransfer(RT_VENDOR_OUT_DEV, REQ_STREAM_ENABLE, 0, 1, null, 0, 1000)
+        val alt1 = iface1Alt1 ?: throw UsbConnectionException(
+            "Streaming interface lost during initialization"
+        )
+        try {
+            conn.setInterface(alt1)
+        } catch (e: Exception) {
+            throw UsbConnectionException(
+                "Failed to activate streaming interface: ${e.message}", e
+            )
+        }
+        val streamEnableResult = conn.controlTransfer(
+            RT_VENDOR_OUT_DEV, REQ_STREAM_ENABLE, 0, 1, null, 0, 1000
+        )
+        if (streamEnableResult < 0) {
+            Log.w(TAG, "Stream-enable control transfer returned $streamEnableResult")
+            throw UsbConnectionException(
+                "Failed to enable camera streaming (error code: $streamEnableResult). " +
+                "Try reconnecting the camera."
+            )
+        }
 
         // 4. Wait for camera ready
         Thread.sleep(2000)
@@ -151,8 +237,11 @@ class ThermalCameraDriver(
         // 5. Discard any partial data waiting in the pipe
         try {
             val dummy = ByteArray(TRANSFER1_SIZE)
-            conn.bulkTransfer(bulkIn, dummy, dummy.size, 100)
-        } catch (_: Exception) {}
+            val discardResult = conn.bulkTransfer(bulkIn, dummy, dummy.size, 100)
+            Log.d(TAG, "Discard phase: got $discardResult bytes")
+        } catch (e: Exception) {
+            Log.d(TAG, "Discard phase: ${e.message} (non-fatal)")
+        }
 
         // 6. Final start stream
         sendCommand(conn, CMD_START_STREAM)
@@ -161,6 +250,7 @@ class ThermalCameraDriver(
         readStatus(conn)
         Log.i(TAG, "Camera ready. Stream response: 0x${resp2[0].toInt().and(0xFF).toString(16)}")
 
+        consecutiveErrors = 0
         streaming = true
     }
 
@@ -168,6 +258,8 @@ class ThermalCameraDriver(
      * Read one raw frame from the camera.
      * Returns [FRAME_SIZE] bytes of pixel data, or null on error.
      * Must be called from a background thread while [streaming] == true.
+     *
+     * @throws UsbConnectionException if too many consecutive read failures occur.
      */
     fun readFrame(): ByteArray? {
         val conn = connection ?: return null
@@ -178,12 +270,26 @@ class ThermalCameraDriver(
         val n1 = conn.bulkTransfer(ep, buf1, TRANSFER1_SIZE, 10000)
         if (n1 != TRANSFER1_SIZE) {
             Log.w(TAG, "Transfer 1 got $n1 bytes, expected $TRANSFER1_SIZE")
-            if (n1 <= 0) return null
+            if (n1 <= 0) {
+                consecutiveErrors++
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    throw UsbConnectionException(
+                        "Lost communication with camera ($consecutiveErrors consecutive read failures)"
+                    )
+                }
+                return null
+            }
         }
 
         // Transfer 2: end marker (discard)
         val buf2 = ByteArray(MARKER_SIZE)
-        conn.bulkTransfer(ep, buf2, MARKER_SIZE, 2000)
+        val n2 = conn.bulkTransfer(ep, buf2, MARKER_SIZE, 2000)
+        if (n2 < 0) {
+            Log.w(TAG, "Transfer 2 (end marker) failed with code $n2")
+        }
+
+        // Reset consecutive error counter on successful read
+        consecutiveErrors = 0
 
         // Pixel data starts after the 12-byte start marker
         return buf1.copyOfRange(MARKER_SIZE, TRANSFER1_SIZE)
@@ -192,22 +298,34 @@ class ThermalCameraDriver(
     /** Trigger the shutter / NUC calibration. */
     fun triggerShutter() {
         val conn = connection ?: return
-        sendCommand(conn, CMD_SHUTTER)
-        readStatus(conn)
+        try {
+            sendCommand(conn, CMD_SHUTTER)
+            readStatus(conn)
+        } catch (e: Exception) {
+            Log.e(TAG, "Shutter command failed", e)
+        }
     }
 
     /** Switch to high gain mode (-20°C to 150°C). */
     fun setGainHigh() {
         val conn = connection ?: return
-        sendCommand(conn, CMD_GAIN_HIGH)
-        readStatus(conn)
+        try {
+            sendCommand(conn, CMD_GAIN_HIGH)
+            readStatus(conn)
+        } catch (e: Exception) {
+            Log.e(TAG, "Set gain high failed", e)
+        }
     }
 
     /** Switch to low gain mode (0°C to 550°C). */
     fun setGainLow() {
         val conn = connection ?: return
-        sendCommand(conn, CMD_GAIN_LOW)
-        readStatus(conn)
+        try {
+            sendCommand(conn, CMD_GAIN_LOW)
+            readStatus(conn)
+        } catch (e: Exception) {
+            Log.e(TAG, "Set gain low failed", e)
+        }
     }
 
     /**
@@ -218,14 +336,21 @@ class ThermalCameraDriver(
         try {
             val conn = connection ?: return
             // Switch back to inactive alt setting
-            iface1Alt0?.let { conn.setInterface(it) }
-            iface0?.let  { conn.releaseInterface(it) }
-            iface1Alt0?.let { conn.releaseInterface(it) }
+            try { iface1Alt0?.let { conn.setInterface(it) } } catch (e: Exception) {
+                Log.w(TAG, "Failed to reset interface alt setting", e)
+            }
+            try { iface0?.let { conn.releaseInterface(it) } } catch (e: Exception) {
+                Log.w(TAG, "Failed to release interface 0", e)
+            }
+            try { iface1Alt0?.let { conn.releaseInterface(it) } } catch (e: Exception) {
+                Log.w(TAG, "Failed to release interface 1", e)
+            }
             conn.close()
         } catch (e: Exception) {
             Log.e(TAG, "Error during disconnect", e)
         } finally {
             connection = null
+            bulkIn = null
         }
     }
 
@@ -234,18 +359,44 @@ class ThermalCameraDriver(
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private fun sendCommand(conn: UsbDeviceConnection, cmd: ByteArray) {
-        conn.controlTransfer(RT_VENDOR_OUT_IFACE, REQ_WRITE, 0, 0, cmd, cmd.size, 1000)
+        val result = conn.controlTransfer(
+            RT_VENDOR_OUT_IFACE, REQ_WRITE, 0, 0, cmd, cmd.size, 1000
+        )
+        if (result < 0) {
+            Log.w(TAG, "sendCommand: controlTransfer returned $result")
+            throw UsbTransferException("USB command transfer failed (error code: $result)")
+        }
     }
 
     private fun readStatus(conn: UsbDeviceConnection): Byte {
         val buf = ByteArray(1)
-        conn.controlTransfer(RT_VENDOR_IN_IFACE, REQ_STATUS, 0, 0, buf, 1, 1000)
+        val result = conn.controlTransfer(
+            RT_VENDOR_IN_IFACE, REQ_STATUS, 0, 0, buf, 1, 1000
+        )
+        if (result < 0) {
+            Log.w(TAG, "readStatus: controlTransfer returned $result")
+            throw UsbTransferException("USB status read failed (error code: $result)")
+        }
         return buf[0]
     }
 
     private fun readResponse(conn: UsbDeviceConnection, length: Int): ByteArray {
         val buf = ByteArray(length)
-        conn.controlTransfer(RT_VENDOR_IN_IFACE, REQ_READ_RESP, 0, 0, buf, length, 1000)
+        val result = conn.controlTransfer(
+            RT_VENDOR_IN_IFACE, REQ_READ_RESP, 0, 0, buf, length, 1000
+        )
+        if (result < 0) {
+            Log.w(TAG, "readResponse: controlTransfer returned $result")
+            throw UsbTransferException("USB response read failed (error code: $result)")
+        }
         return buf
     }
 }
+
+/** Exception indicating a USB connection or initialization failure. */
+class UsbConnectionException(message: String, cause: Throwable? = null) :
+    Exception(message, cause)
+
+/** Exception indicating a USB control transfer failure. */
+class UsbTransferException(message: String, cause: Throwable? = null) :
+    Exception(message, cause)
