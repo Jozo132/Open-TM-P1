@@ -116,7 +116,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:text="160×120"
+            android:text="@string/camera_resolution"
             android:textColor="@color/text_secondary"
             android:textSize="12sp"
             android:fontFamily="sans-serif" />
