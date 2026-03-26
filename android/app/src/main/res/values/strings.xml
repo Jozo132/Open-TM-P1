@@ -11,6 +11,8 @@
     <string name="streaming">Streaming</string>
     <string name="disconnected">Disconnected</string>
     <string name="error_prefix">Error: </string>
+    <string name="error_usb_permission">USB permission was revoked or denied. Please reconnect the camera and grant permission.</string>
+    <string name="error_fatal">A fatal error occurred: %1$s\nPlease restart the app.</string>
 
     <!-- Camera info -->
     <string name="camera_model">P1 Camera</string>

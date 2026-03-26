@@ -25,6 +25,8 @@ import com.github.opentmp1.camera.FrameParser
 import com.github.opentmp1.camera.ThermalCameraDriver
 import com.github.opentmp1.databinding.ActivityMainBinding
 import com.github.opentmp1.ui.ColormapManager
+import com.github.opentmp1.camera.UsbConnectionException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,7 +53,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var usbManager: UsbManager
 
     private var driver: ThermalCameraDriver? = null
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.e(TAG, "Unhandled coroutine exception", throwable)
+        runOnUiThread {
+            showStatus(
+                "${getString(R.string.error_prefix)}${throwable.message ?: "Unknown error"}",
+                error = true
+            )
+        }
+    }
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob() + coroutineExceptionHandler)
     private var streamJob: Job? = null
 
     // ── State ────────────────────────────────────────────────────────────────
@@ -76,6 +87,26 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Prevent unhandled exceptions from crashing the whole system (some phones reboot)
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.e(TAG, "UNCAUGHT EXCEPTION on thread ${thread.name}", throwable)
+            try {
+                runOnUiThread {
+                    showStatus(
+                        getString(R.string.error_fatal, throwable.message ?: "Unknown error"),
+                        error = true
+                    )
+                }
+            } catch (_: Exception) {
+                // If we can't even show the UI error, fall through to default handler
+            }
+            // Still delegate to the default handler so the OS knows the app crashed,
+            // but the error is now logged and the user sees a message first.
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -126,27 +157,35 @@ class MainActivity : AppCompatActivity() {
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                ACTION_USB_PERMISSION -> {
-                    val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
-                    if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false) && device != null) {
-                        startCamera(device)
-                    } else {
-                        showStatus(getString(R.string.permission_denied), error = true)
+            try {
+                when (intent.action) {
+                    ACTION_USB_PERMISSION -> {
+                        val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
+                        if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false) && device != null) {
+                            startCamera(device)
+                        } else {
+                            showStatus(getString(R.string.permission_denied), error = true)
+                        }
+                    }
+                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                        val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
+                        if (device != null && isP1Camera(device)) requestPermission(device)
+                    }
+                    UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                        val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
+                        if (device != null && isP1Camera(device)) {
+                            stopStreaming()
+                            connectedDevice = null
+                            showStatus(getString(R.string.disconnected))
+                        }
                     }
                 }
-                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                    val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
-                    if (device != null && isP1Camera(device)) requestPermission(device)
-                }
-                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
-                    if (device != null && isP1Camera(device)) {
-                        stopStreaming()
-                        connectedDevice = null
-                        showStatus(getString(R.string.disconnected))
-                    }
-                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling USB event: ${intent.action}", e)
+                showStatus(
+                    "${getString(R.string.error_prefix)}USB event error: ${e.message}",
+                    error = true
+                )
             }
         }
     }
@@ -175,15 +214,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestPermission(device: UsbDevice) {
-        if (usbManager.hasPermission(device)) {
-            startCamera(device)
-        } else {
-            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                PendingIntent.FLAG_MUTABLE else 0
-            val permIntent = PendingIntent.getBroadcast(this, 0,
-                Intent(ACTION_USB_PERMISSION), flags)
-            usbManager.requestPermission(device, permIntent)
-            showStatus(getString(R.string.connecting))
+        try {
+            if (usbManager.hasPermission(device)) {
+                startCamera(device)
+            } else {
+                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                    PendingIntent.FLAG_MUTABLE else 0
+                val permIntent = PendingIntent.getBroadcast(this, 0,
+                    Intent(ACTION_USB_PERMISSION), flags)
+                usbManager.requestPermission(device, permIntent)
+                showStatus(getString(R.string.connecting))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to request USB permission", e)
+            showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
+            updateStatusDot(StatusState.ERROR)
         }
     }
 
@@ -207,45 +252,81 @@ class MainActivity : AppCompatActivity() {
                 resetDiagnostics()
                 showStreaming(true)
                 launchStreamLoop(newDriver)
+            } catch (e: UsbConnectionException) {
+                Log.e(TAG, "Camera connect failed: USB error", e)
+                showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
+                updateStatusDot(StatusState.ERROR)
+                try { newDriver.disconnect() } catch (_: Exception) {}
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Camera connect failed: permission error", e)
+                showStatus(getString(R.string.error_usb_permission), error = true)
+                updateStatusDot(StatusState.ERROR)
+                try { newDriver.disconnect() } catch (_: Exception) {}
             } catch (e: Exception) {
                 Log.e(TAG, "Camera connect failed", e)
                 showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
                 updateStatusDot(StatusState.ERROR)
+                try { newDriver.disconnect() } catch (_: Exception) {}
             }
         }
     }
 
     private fun launchStreamLoop(d: ThermalCameraDriver) {
         streamJob = scope.launch(Dispatchers.IO) {
-            while (isActive && d.isStreaming()) {
-                try {
-                    val rawFrame = d.readFrame()
-                    if (rawFrame == null) {
+            try {
+                while (isActive && d.isStreaming()) {
+                    try {
+                        val rawFrame = d.readFrame()
+                        if (rawFrame == null) {
+                            droppedFrames++
+                            continue
+                        }
+                        val frame = FrameParser.parse(rawFrame)
+                        frameCount++
+                        fpsFrameCount++
+
+                        // Calculate FPS every second
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastFpsTime >= 1000) {
+                            currentFps = fpsFrameCount * 1000f / (now - lastFpsTime)
+                            fpsFrameCount = 0
+                            lastFpsTime = now
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            binding.thermalView.updateFrame(frame)
+                            updateTemperatureHud(frame)
+                            updateFpsDisplay()
+                            updateDiagnosticsIfVisible()
+                        }
+                    } catch (e: UsbConnectionException) {
+                        // Fatal connection loss — stop streaming and notify user
+                        Log.e(TAG, "USB connection lost during streaming", e)
+                        withContext(Dispatchers.Main) {
+                            stopStreaming()
+                            showStatus(
+                                "${getString(R.string.error_prefix)}${e.message}",
+                                error = true
+                            )
+                            updateStatusDot(StatusState.ERROR)
+                        }
+                        break
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Frame read error", e)
                         droppedFrames++
-                        continue
+                        delay(100)
                     }
-                    val frame = FrameParser.parse(rawFrame)
-                    frameCount++
-                    fpsFrameCount++
-
-                    // Calculate FPS every second
-                    val now = SystemClock.elapsedRealtime()
-                    if (now - lastFpsTime >= 1000) {
-                        currentFps = fpsFrameCount * 1000f / (now - lastFpsTime)
-                        fpsFrameCount = 0
-                        lastFpsTime = now
-                    }
-
-                    withContext(Dispatchers.Main) {
-                        binding.thermalView.updateFrame(frame)
-                        updateTemperatureHud(frame)
-                        updateFpsDisplay()
-                        updateDiagnosticsIfVisible()
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Frame read error", e)
-                    droppedFrames++
-                    delay(100)
+                }
+            } catch (e: Exception) {
+                // Catch-all for unexpected failures in the loop itself
+                Log.e(TAG, "Stream loop terminated unexpectedly", e)
+                withContext(Dispatchers.Main) {
+                    stopStreaming()
+                    showStatus(
+                        "${getString(R.string.error_prefix)}${e.message ?: "Stream interrupted"}",
+                        error = true
+                    )
+                    updateStatusDot(StatusState.ERROR)
                 }
             }
         }
@@ -254,7 +335,11 @@ class MainActivity : AppCompatActivity() {
     private fun stopStreaming() {
         streamJob?.cancel()
         streamJob = null
-        driver?.disconnect()
+        try {
+            driver?.disconnect()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during driver disconnect", e)
+        }
         driver = null
         showStreaming(false)
     }
