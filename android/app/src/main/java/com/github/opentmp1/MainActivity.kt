@@ -263,18 +263,27 @@ class MainActivity : AppCompatActivity() {
             if (error) getColor(R.color.status_error) else getColor(R.color.status_connecting)
         )
         binding.tempInfoLayout.visibility = View.GONE
-        binding.controlBar.visibility = View.GONE
+        setCameraButtonsEnabled(false)
     }
 
     private fun showStreaming(active: Boolean) {
         if (active) {
             binding.tvStatus.visibility = View.GONE
             binding.tempInfoLayout.visibility = View.VISIBLE
-            binding.controlBar.visibility = View.VISIBLE
+            setCameraButtonsEnabled(true)
         } else {
             binding.tempInfoLayout.visibility = View.GONE
-            binding.controlBar.visibility = View.GONE
+            setCameraButtonsEnabled(false)
         }
+    }
+
+    private fun setCameraButtonsEnabled(enabled: Boolean) {
+        binding.btnShutter.isEnabled = enabled
+        binding.btnGain.isEnabled = enabled
+        binding.btnScreenshot.isEnabled = enabled
+        binding.btnShutter.alpha = if (enabled) 1.0f else 0.4f
+        binding.btnGain.alpha = if (enabled) 1.0f else 0.4f
+        binding.btnScreenshot.alpha = if (enabled) 1.0f else 0.4f
     }
 
     private fun toast(msg: String) {

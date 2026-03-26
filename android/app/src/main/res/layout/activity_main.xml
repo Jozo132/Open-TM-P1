@@ -77,7 +77,7 @@
             android:textSize="13sp" />
     </LinearLayout>
 
-    <!-- Control toolbar (bottom) -->
+    <!-- Control toolbar (bottom, always visible) -->
     <LinearLayout
         android:id="@+id/controlBar"
         android:layout_width="0dp"
@@ -86,6 +86,7 @@
         android:gravity="center"
         android:orientation="horizontal"
         android:padding="8dp"
+        android:visibility="visible"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">

@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Open TM-P1</string>
     <string name="connect_camera">Connect Camera</string>
-    <string name="camera_not_found">Camera not found. Please connect the Thermal Master P1 via USB.</string>
+    <string name="camera_not_found">No camera connected</string>
     <string name="permission_denied">USB permission denied. Please grant permission to use the camera.</string>
     <string name="connecting">Connecting…</string>
     <string name="streaming">Streaming</string>
