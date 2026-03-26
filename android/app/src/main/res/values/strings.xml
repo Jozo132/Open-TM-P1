@@ -1,24 +1,105 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Open TM-P1</string>
+
+    <!-- Connection status -->
     <string name="connect_camera">Connect Camera</string>
     <string name="camera_not_found">No camera connected</string>
+    <string name="camera_not_found_hint">Connect a Thermal Master P1 camera via USB OTG</string>
     <string name="permission_denied">USB permission denied. Please grant permission to use the camera.</string>
     <string name="connecting">Connecting…</string>
     <string name="streaming">Streaming</string>
     <string name="disconnected">Disconnected</string>
     <string name="error_prefix">Error: </string>
-    <string name="btn_shutter">Shutter</string>
-    <string name="btn_gain">Gain: High</string>
-    <string name="btn_colormap">Colormap</string>
-    <string name="btn_screenshot">Screenshot</string>
-    <string name="screenshot_saved">Screenshot saved to Gallery</string>
-    <string name="screenshot_failed">Failed to save screenshot</string>
+
+    <!-- Camera info -->
+    <string name="camera_model">P1 Camera</string>
+    <string name="camera_resolution">160×120</string>
+    <string name="camera_fps">-- fps</string>
+    <string name="camera_connected">Connected</string>
+
+    <!-- Temperature labels -->
     <string name="center_temp">Center: --.--°C</string>
     <string name="min_temp">Min: --.--°C</string>
     <string name="max_temp">Max: --.--°C</string>
     <string name="touch_temp">Touch: --.--°C</string>
-    <string name="shutter_triggered">Shutter triggered</string>
+    <string name="center_temp_value">--.--°C</string>
+
+    <!-- Buttons (legacy compatibility) -->
+    <string name="btn_shutter">Shutter</string>
+    <string name="btn_gain">Gain: High</string>
+    <string name="btn_colormap">Colormap</string>
+    <string name="btn_screenshot">Screenshot</string>
+
+    <!-- Capture modes -->
+    <string name="mode_photo">PHOTO</string>
+    <string name="mode_video">VIDEO</string>
+
+    <!-- Actions -->
+    <string name="screenshot_saved">Screenshot saved to Gallery</string>
+    <string name="screenshot_failed">Failed to save screenshot</string>
+    <string name="shutter_triggered">NUC calibration triggered</string>
     <string name="gain_high">Gain: High (-20°C to 150°C)</string>
     <string name="gain_low">Gain: Low (0°C to 550°C)</string>
+    <string name="recording_started">Recording started</string>
+    <string name="recording_stopped">Recording saved to Gallery</string>
+    <string name="recording_failed">Recording failed</string>
+
+    <!-- Settings panel -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_colormap">Colormap</string>
+    <string name="settings_gain_mode">Gain Mode</string>
+    <string name="settings_gain_high">High (-20°C to 150°C)</string>
+    <string name="settings_gain_low">Low (0°C to 550°C)</string>
+    <string name="settings_overlays">Overlays</string>
+    <string name="settings_show_reticule">Center Reticule</string>
+    <string name="settings_show_minmax">Min/Max Markers</string>
+    <string name="settings_show_colorbar">Color Bar</string>
+    <string name="settings_show_temp_hud">Temperature HUD</string>
+    <string name="settings_image">Image</string>
+    <string name="settings_auto_range">Auto Range (AGC)</string>
+
+    <!-- Calibration panel -->
+    <string name="calibration_title">Calibration</string>
+    <string name="calibration_nuc">NUC Correction</string>
+    <string name="calibration_nuc_desc">Non-uniformity correction aligns the sensor response across all pixels. Trigger when the image appears noisy or has visible banding.</string>
+    <string name="calibration_trigger">Trigger NUC</string>
+    <string name="calibration_last">Last calibration</string>
+    <string name="calibration_never">Never (this session)</string>
+    <string name="calibration_gain_mode">Gain Mode</string>
+    <string name="calibration_gain_desc">High gain provides better resolution for near-ambient temperatures. Low gain extends the range for high-temperature scenes.</string>
+    <string name="calibration_switch_high">Switch to High Gain</string>
+    <string name="calibration_switch_low">Switch to Low Gain</string>
+    <string name="calibration_current_gain">Current: %s</string>
+
+    <!-- Diagnostics panel -->
+    <string name="diagnostics_title">Diagnostics</string>
+    <string name="diagnostics_connection">Connection</string>
+    <string name="diagnostics_status">Status</string>
+    <string name="diagnostics_usb_device">USB Device</string>
+    <string name="diagnostics_vid_pid">VID / PID</string>
+    <string name="diagnostics_interface">Interface</string>
+    <string name="diagnostics_performance">Performance</string>
+    <string name="diagnostics_fps">Frame Rate</string>
+    <string name="diagnostics_frame_count">Frames Received</string>
+    <string name="diagnostics_uptime">Stream Uptime</string>
+    <string name="diagnostics_dropped">Dropped Frames</string>
+    <string name="diagnostics_temperature">Temperature Stats</string>
+    <string name="diagnostics_scene_range">Scene Range</string>
+    <string name="diagnostics_center">Center</string>
+    <string name="diagnostics_sensor">Sensor</string>
+    <string name="diagnostics_resolution">Resolution</string>
+    <string name="diagnostics_frame_size">Frame Size</string>
+    <string name="diagnostics_not_connected">Not connected</string>
+    <string name="diagnostics_na">N/A</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_settings">Settings</string>
+    <string name="cd_calibration">Calibration</string>
+    <string name="cd_diagnostics">Diagnostics</string>
+    <string name="cd_capture">Capture</string>
+    <string name="cd_mode_toggle">Toggle photo/video mode</string>
+    <string name="cd_close">Close</string>
+    <string name="cd_colormap">Change colormap</string>
+    <string name="cd_gain">Toggle gain</string>
 </resources>

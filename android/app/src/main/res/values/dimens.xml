@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Capture button -->
+    <dimen name="capture_button_size">72dp</dimen>
+    <dimen name="capture_button_margin">16dp</dimen>
+
+    <!-- Quick settings -->
+    <dimen name="quick_button_size">44dp</dimen>
+    <dimen name="quick_button_margin">8dp</dimen>
+
+    <!-- Panels -->
+    <dimen name="panel_width">320dp</dimen>
+    <dimen name="panel_padding">20dp</dimen>
+    <dimen name="panel_corner_radius">16dp</dimen>
+
+    <!-- Top bar -->
+    <dimen name="top_bar_height">48dp</dimen>
+    <dimen name="top_bar_padding">12dp</dimen>
+
+    <!-- Bottom bar -->
+    <dimen name="bottom_bar_height">96dp</dimen>
+    <dimen name="bottom_bar_padding">8dp</dimen>
+
+    <!-- HUD -->
+    <dimen name="hud_padding">10dp</dimen>
+    <dimen name="hud_corner_radius">20dp</dimen>
+
+    <!-- Icons -->
+    <dimen name="icon_size_small">20dp</dimen>
+    <dimen name="icon_size_medium">24dp</dimen>
+    <dimen name="icon_size_large">32dp</dimen>
+
+    <!-- Status indicator -->
+    <dimen name="status_dot_size">8dp</dimen>
+</resources>

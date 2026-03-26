@@ -1,19 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#FF6200EE</color>
-    <color name="colorPrimaryVariant">#FF3700B3</color>
+    <!-- Material theme colors -->
+    <color name="colorPrimary">#FF1A1A2E</color>
+    <color name="colorPrimaryVariant">#FF0F0F1A</color>
     <color name="colorOnPrimary">#FFFFFFFF</color>
-    <color name="colorSecondary">#FF03DAC5</color>
-    <color name="colorSecondaryVariant">#FF018786</color>
+    <color name="colorSecondary">#FF00BCD4</color>
+    <color name="colorSecondaryVariant">#FF0097A7</color>
     <color name="colorOnSecondary">#FF000000</color>
     <color name="colorBackground">#FF000000</color>
-    <color name="colorSurface">#FF000000</color>
+    <color name="colorSurface">#FF121212</color>
     <color name="colorOnBackground">#FFFFFFFF</color>
     <color name="colorOnSurface">#FFFFFFFF</color>
-    <color name="overlay_bg">#AA000000</color>
+
+    <!-- Camera UI colors -->
+    <color name="overlay_bg">#99000000</color>
+    <color name="overlay_bg_heavy">#CC000000</color>
+    <color name="panel_bg">#E6181818</color>
+    <color name="panel_header_bg">#FF222233</color>
+
+    <!-- Text colors -->
     <color name="temp_text">#FFFFFFFF</color>
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#B3FFFFFF</color>
+    <color name="text_tertiary">#66FFFFFF</color>
+
+    <!-- Temperature label colors -->
+    <color name="temp_center">#FFFFFFFF</color>
+    <color name="temp_min">#FF40C4FF</color>
+    <color name="temp_max">#FFFF5252</color>
+    <color name="temp_touch">#FFFFAB40</color>
+
+    <!-- Reticule and markers -->
     <color name="reticule_color">#FFFF0000</color>
-    <color name="status_ok">#FF00FF00</color>
-    <color name="status_error">#FFFF3333</color>
-    <color name="status_connecting">#FFFFFF00</color>
+
+    <!-- Status colors -->
+    <color name="status_ok">#FF4CAF50</color>
+    <color name="status_error">#FFFF5252</color>
+    <color name="status_connecting">#FFFFC107</color>
+    <color name="status_streaming">#FF4CAF50</color>
+
+    <!-- Capture button -->
+    <color name="capture_ring">#FFFFFFFF</color>
+    <color name="capture_photo_fill">#FFFFFFFF</color>
+    <color name="capture_video_fill">#FFFF3333</color>
+
+    <!-- Accent -->
+    <color name="accent">#FF00BCD4</color>
+    <color name="accent_light">#FF4DD0E1</color>
 </resources>
