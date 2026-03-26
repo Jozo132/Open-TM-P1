@@ -6,8 +6,11 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
+import android.hardware.usb.UsbRequest
+import android.os.Build
 import android.util.Log
 import com.github.opentmp1.AppLogger
+import java.nio.ByteBuffer
 
 /**
  * USB driver for the Thermal Master P1 camera.
@@ -75,6 +78,9 @@ class ThermalCameraDriver(
         // Bulk endpoint address (IN)
         private const val ENDPOINT_IN = 0x81
 
+        // Max bytes per bulkTransfer call. Keeps individual kernel URBs small
+        // to avoid crashing weak USB host controllers (Samsung A10 / Exynos 7884).
+
         /** Number of consecutive frame read failures before auto-disconnect. */
         const val MAX_CONSECUTIVE_ERRORS = 30
 
@@ -104,6 +110,7 @@ class ThermalCameraDriver(
     fun connect() {
         Log.i(TAG, "Connecting to P1 camera…")
         AppLogger.i(TAG, "Connecting to P1 camera…")
+        checkCancelled("pre-open")
 
         // Phase 1: Open the USB device
         try {
@@ -121,6 +128,7 @@ class ThermalCameraDriver(
                 "The device may be in use by another app or the USB connection is unstable."
             )
         }
+        checkCancelled("post-open")
 
         // Phase 2: Locate interfaces and alternate settings
         iface0 = null
@@ -177,6 +185,7 @@ class ThermalCameraDriver(
         )
 
         // Phase 3: Claim interfaces
+        checkCancelled("pre-claim")
         try {
             if (!conn.claimInterface(iface0, true)) {
                 throw UsbConnectionException(
@@ -184,6 +193,7 @@ class ThermalCameraDriver(
                     "Another app may be using the camera."
                 )
             }
+            checkCancelled("post-claim-iface0")
             if (!conn.claimInterface(iface1Alt0, true)) {
                 throw UsbConnectionException(
                     "Failed to claim USB streaming interface. " +
@@ -194,6 +204,7 @@ class ThermalCameraDriver(
             if (e is UsbConnectionException) throw e
             throw UsbConnectionException("Failed to claim USB interfaces: ${e.message}", e)
         }
+        checkCancelled("post-claim")
 
         // Phase 4: Run initialization sequence
         try {
@@ -209,16 +220,21 @@ class ThermalCameraDriver(
     private fun initSequence(conn: UsbDeviceConnection) {
         // 1. Send initial start-stream command
         AppLogger.i(TAG, "Init phase 1: sending start-stream command")
+        checkCancelled("init-phase1-pre")
         sendCommand(conn, CMD_START_STREAM)
+        checkCancelled("init-phase1-post-cmd")
         readStatus(conn)
+        checkCancelled("init-phase1-post-status")
         val resp1 = readResponse(conn, 1)
+        checkCancelled("init-phase1-post-resp")
         readStatus(conn)
+        checkCancelled("init-phase1-done")
         Log.d(TAG, "Init start_stream response: 0x${resp1[0].toInt().and(0xFF).toString(16)}")
 
         // 2. Brief pause
         AppLogger.i(TAG, "Init phase 2: 1s pause")
         Thread.sleep(1000)
-        if (cancelled) throw UsbConnectionException("Connection cancelled during init")
+        checkCancelled("init-phase2")
 
         // 3. Enable streaming interface (alt setting 1)
         AppLogger.i(TAG, "Init phase 3: activating streaming interface")
@@ -232,6 +248,7 @@ class ThermalCameraDriver(
                 "Failed to activate streaming interface: ${e.message}", e
             )
         }
+        checkCancelled("init-phase3-post-setInterface")
         val streamEnableResult = conn.controlTransfer(
             RT_VENDOR_OUT_DEV, REQ_STREAM_ENABLE, 0, 1, null, 0, 1000
         )
@@ -242,11 +259,12 @@ class ThermalCameraDriver(
                 "Try reconnecting the camera."
             )
         }
+        checkCancelled("init-phase3-done")
 
         // 4. Wait for camera ready
         AppLogger.i(TAG, "Init phase 4: 2s wait for camera ready")
         Thread.sleep(2000)
-        if (cancelled) throw UsbConnectionException("Connection cancelled during init")
+        checkCancelled("init-phase4")
 
         // 5. Discard any partial data waiting in the pipe
         AppLogger.i(TAG, "Init phase 5: draining stale buffers")
@@ -254,20 +272,27 @@ class ThermalCameraDriver(
             val dummy = ByteArray(TRANSFER1_SIZE)
             var totalDiscarded = 0
             for (i in 0 until 5) {
+                checkCancelled("init-phase5-drain-$i")
                 val n = conn.bulkTransfer(bulkIn, dummy, dummy.size, 200)
                 if (n <= 0) break
                 totalDiscarded += n
             }
             Log.d(TAG, "Discard phase: drained $totalDiscarded bytes")
+        } catch (e: UsbConnectionException) {
+            throw e  // re-throw cancellation
         } catch (e: Exception) {
             Log.d(TAG, "Discard phase: ${e.message} (non-fatal)")
         }
+        checkCancelled("init-phase5-done")
 
         // 6. Final start stream
         AppLogger.i(TAG, "Init phase 6: final start-stream command")
         sendCommand(conn, CMD_START_STREAM)
+        checkCancelled("init-phase6-post-cmd")
         readStatus(conn)
+        checkCancelled("init-phase6-post-status")
         val resp2 = readResponse(conn, 1)
+        checkCancelled("init-phase6-post-resp")
         readStatus(conn)
         AppLogger.i(TAG, "Camera ready — streaming enabled")
 
@@ -275,23 +300,78 @@ class ThermalCameraDriver(
         streaming = true
     }
 
+    /** Throws UsbConnectionException if [cancelled] has been set. */
+    private fun checkCancelled(label: String) {
+        if (cancelled) {
+            AppLogger.w(TAG, "Cancelled at $label")
+            throw UsbConnectionException("Connection cancelled at $label")
+        }
+    }
+
     /**
-     * Read one raw frame from the camera.
+     * Read one raw frame from the camera using the async UsbRequest API.
      * Returns [FRAME_SIZE] bytes of pixel data, or null on error.
-     * Must be called from a background thread while [streaming] == true.
+     *
+     * Uses UsbRequest (USBDEVFS_SUBMITURB + REAPURB) instead of synchronous
+     * bulkTransfer (USBDEVFS_BULK) to avoid a Samsung A10 kernel bug where
+     * long-blocking synchronous bulk reads cause a kernel panic / hard reboot.
      *
      * @throws UsbConnectionException if too many consecutive read failures occur.
      */
     fun readFrame(): ByteArray? {
+        if (cancelled) return null
         val conn = connection ?: return null
         val ep   = bulkIn ?: return null
 
         // Transfer 1: start marker (12 bytes) + all pixel data (FRAME_SIZE bytes)
-        val buf1 = ByteArray(TRANSFER1_SIZE)
-        val n1 = conn.bulkTransfer(ep, buf1, TRANSFER1_SIZE, 10000)
-        if (n1 != TRANSFER1_SIZE) {
-            Log.w(TAG, "Transfer 1 got $n1 bytes, expected $TRANSFER1_SIZE")
-            if (n1 <= 0) {
+        val buf1 = ByteBuffer.allocate(TRANSFER1_SIZE)
+        val req1 = UsbRequest()
+        try {
+            if (!req1.initialize(conn, ep)) {
+                consecutiveErrors++
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    AppLogger.e(TAG, "Lost camera: cannot initialize UsbRequest")
+                    throw UsbConnectionException("Cannot initialize USB request")
+                }
+                return null
+            }
+            @Suppress("DEPRECATION")
+            if (!req1.queue(buf1, TRANSFER1_SIZE)) {
+                consecutiveErrors++
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    AppLogger.e(TAG, "Lost camera: $consecutiveErrors consecutive read failures")
+                    throw UsbConnectionException(
+                        "Lost communication with camera ($consecutiveErrors consecutive read failures)"
+                    )
+                }
+                return null
+            }
+
+            // requestWait: uses REAPURB (non-blocking at EHCI level, waits in user space).
+            // API 26+ supports a timeout; older APIs block indefinitely.
+            val completed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                conn.requestWait(5000)   // 5 s timeout
+            } else {
+                conn.requestWait()
+            }
+            if (completed == null) {
+                consecutiveErrors++
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    AppLogger.e(TAG, "Lost camera: $consecutiveErrors consecutive read failures")
+                    throw UsbConnectionException(
+                        "Lost communication with camera ($consecutiveErrors consecutive read failures)"
+                    )
+                }
+                return null
+            }
+        } finally {
+            req1.close()
+        }
+
+        val bytesRead = buf1.position()
+        if (bytesRead < TRANSFER1_SIZE) {
+            Log.w(TAG, "Transfer 1 got $bytesRead bytes, expected $TRANSFER1_SIZE")
+            if (bytesRead <= 0) {
                 consecutiveErrors++
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                     AppLogger.e(TAG, "Lost camera: $consecutiveErrors consecutive read failures")
@@ -303,9 +383,9 @@ class ThermalCameraDriver(
             }
         }
 
-        // Transfer 2: end marker (discard)
+        // Transfer 2: end marker (discard) - use simple sync call, it's only 12 bytes
         val buf2 = ByteArray(MARKER_SIZE)
-        val n2 = conn.bulkTransfer(ep, buf2, MARKER_SIZE, 2000)
+        val n2 = conn.bulkTransfer(ep, buf2, MARKER_SIZE, 1000)
         if (n2 < 0) {
             Log.w(TAG, "Transfer 2 (end marker) failed with code $n2")
         }
@@ -314,7 +394,11 @@ class ThermalCameraDriver(
         consecutiveErrors = 0
 
         // Pixel data starts after the 12-byte start marker
-        return buf1.copyOfRange(MARKER_SIZE, TRANSFER1_SIZE)
+        buf1.flip()
+        val result = ByteArray(FRAME_SIZE)
+        buf1.position(MARKER_SIZE)
+        buf1.get(result, 0, FRAME_SIZE)
+        return result
     }
 
     /**

@@ -304,6 +304,30 @@
     </LinearLayout>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
+         LAYER 5.5: Live debug console (6 rows, above bottom bar)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <TextView
+        android:id="@+id/tvDebugConsole"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="#CC000000"
+        android:fontFamily="monospace"
+        android:includeFontPadding="false"
+        android:lines="10"
+        android:maxLines="10"
+        android:ellipsize="start"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:textColor="#AAFFFFFF"
+        android:textSize="7sp"
+        android:visibility="visible"
+        app:layout_constraintBottom_toTopOf="@id/bottomBar"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
          LAYER 6: Bottom camera bar
          ═══════════════════════════════════════════════════════════════════════ -->
     <LinearLayout
@@ -504,6 +528,19 @@
                 android:textColor="@color/text_primary"
                 android:textSize="18sp"
                 android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnClearLogs"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="@string/log_clear"
+                android:textSize="12sp"
+                android:textColor="@color/status_error"
+                android:backgroundTint="@color/panel_header_bg"
+                android:textAllCaps="false"
+                android:layout_marginEnd="4dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp" />
 
             <Button
                 android:id="@+id/btnExportLogs"

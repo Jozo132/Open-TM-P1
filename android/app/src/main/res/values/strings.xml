@@ -114,6 +114,8 @@
     <string name="diagnostics_view_logs">View Logs</string>
     <string name="log_viewer_title">Application Logs</string>
     <string name="log_export">Export</string>
+    <string name="log_clear">Clear</string>
+    <string name="log_cleared">Logs cleared</string>
     <string name="log_exported">Log exported to Downloads</string>
     <string name="log_export_failed">Failed to export log</string>
     <string name="log_shared">Sharing log…</string>

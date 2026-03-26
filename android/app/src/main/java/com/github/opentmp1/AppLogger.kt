@@ -3,7 +3,7 @@ package com.github.opentmp1
 import android.content.Context
 import android.util.Log
 import java.io.File
-import java.io.FileWriter
+import java.io.FileOutputStream
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.text.SimpleDateFormat
@@ -41,6 +41,10 @@ object AppLogger {
     private val recentEntries = ConcurrentLinkedQueue<String>()
     private const val RING_SIZE = 200
 
+    // Live-push callback invoked on every new log entry (called from the write executor).
+    // Registered by the UI; must be thread-safe (post to main thread inside the lambda).
+    @Volatile var onNewEntry: ((String) -> Unit)? = null
+
     /**
      * Initialize the logger. Call once from Application or Activity onCreate.
      * Prunes old log files and writes a session-start marker.
@@ -67,7 +71,7 @@ object AppLogger {
      * Log a battery/power snapshot (called periodically while streaming).
      */
     fun power(batteryPct: Int, voltMv: Int, currentUa: Int, tempTenths: Int, drainRate: Float, charging: Boolean) {
-        val line = "bat=$batteryPct%% V=${voltMv}mV I=${currentUa}µA T=${tempTenths/10f}°C drain=%.1f%%/min chg=$charging".format(drainRate)
+        val line = "bat=$batteryPct%% V=${voltMv}mV I=${currentUa}uA T=${tempTenths/10f}degC drain=%.1f%%/min chg=$charging".format(drainRate)
         log(Level.INFO, "Power", line)
     }
 
@@ -75,6 +79,14 @@ object AppLogger {
      * Returns the most recent log entries (up to [RING_SIZE]) for display.
      */
     fun getRecentEntries(): List<String> = recentEntries.toList()
+
+    /**
+     * Returns the last [n] log entries as a single newline-joined string.
+     */
+    fun getTailLines(n: Int): String {
+        val all = recentEntries.toList()
+        return all.takeLast(n).joinToString("\n")
+    }
 
     /**
      * Read all log files from the last [days] days and return their content.
@@ -111,11 +123,10 @@ object AppLogger {
             totalSize > 1024 -> "%.1f KB".format(totalSize / 1024f)
             else -> "$totalSize B"
         }
-        return "${files.size} file(s), $sizeStr | ${sorted.first().name.removeSuffix(".log")} → ${sorted.last().name.removeSuffix(".log")}"
+        return "${files.size} file(s), $sizeStr | ${sorted.first().name.removeSuffix(".log")} -> ${sorted.last().name.removeSuffix(".log")}"
     }
 
-    // ── Internal ─────────────────────────────────────────────────────────────
-
+    // --- Internal ---
     private fun log(level: Level, component: String, message: String) {
         val now = Date()
         val timestamp = timeFormat.format(now)
@@ -133,6 +144,9 @@ object AppLogger {
         recentEntries.add(entry)
         while (recentEntries.size > RING_SIZE) recentEntries.poll()
 
+        // Notify live listener (UI debug console)
+        onNewEntry?.invoke(entry)
+
         // Async file write
         val dir = logDir ?: return
         val dayStr = dateFormat.format(now)
@@ -144,11 +158,24 @@ object AppLogger {
                     val rotated = File(dir, "$dayStr-overflow.log")
                     if (!rotated.exists()) file.renameTo(rotated)
                 }
-                FileWriter(file, true).use { it.write(entry + "\n") }
+                FileOutputStream(file, true).use { fos ->
+                    fos.write((entry + "\n").toByteArray(Charsets.UTF_8))
+                    fos.fd.sync()   // force kernel buffer flush to physical storage (survives hard reset)
+                }
             } catch (ex: Exception) {
                 Log.e("AppLogger", "Failed to write log", ex)
             }
         }
+    }
+
+    /**
+     * Delete all stored log files and clear the in-memory ring buffer.
+     */
+    fun clearLogs() {
+        recentEntries.clear()
+        val dir = logDir ?: return
+        dir.listFiles { f -> f.name.endsWith(".log") }?.forEach { it.delete() }
+        i("AppLogger", "=== Logs cleared ===")
     }
 
     private fun pruneOldFiles() {

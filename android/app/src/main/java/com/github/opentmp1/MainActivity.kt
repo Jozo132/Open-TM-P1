@@ -36,12 +36,15 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 
 class MainActivity : AppCompatActivity() {
 
@@ -68,12 +71,15 @@ class MainActivity : AppCompatActivity() {
     }
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob() + coroutineExceptionHandler)
     private var streamJob: Job? = null
-    private var connectJob: Job? = null
 
     // Connection generation: monotonically incrementing token.
     // Every new connect or forced stop bumps this. Old coroutines compare
     // their captured generation to the current value and bail if stale.
-    @Volatile private var connectionGeneration = 0L
+    private val connectionGeneration = AtomicLong(0)
+
+    // Mutex serializes all USB lifecycle operations (connect, disconnect,
+    // permission result, attach/detach handling) so they never overlap.
+    private val usbLifecycleMutex = Mutex()
 
     // Debounce / dedup for USB broadcasts
     private var lastAttachTime = 0L
@@ -82,13 +88,13 @@ class MainActivity : AppCompatActivity() {
     private var lastDetachDeviceName: String? = null
     private val BROADCAST_DEDUP_MS = 1000L
 
-    // ── State ────────────────────────────────────────────────────────────────
+    // --- State ---
     private var gainHigh = true
     private var videoMode = false
     private var isRecording = false
     private var showTempHud = true
 
-    // ── Diagnostics tracking ─────────────────────────────────────────────────
+    // --- Diagnostics tracking ---
     private var frameCount = 0L
     private var droppedFrames = 0L
     private var streamStartTime = 0L
@@ -98,11 +104,11 @@ class MainActivity : AppCompatActivity() {
     private var lastCalibrationTime: String? = null
     private var connectedDevice: UsbDevice? = null
 
-    // ── Power monitoring ─────────────────────────────────────────────────────
-    private var batteryLevel = -1           // 0–100 %
+    // --- Power monitoring ---
+    private var batteryLevel = -1           // 0-100 %
     private var batteryVoltage = -1         // millivolts
     private var batteryCurrentNow = 0       // microamps (negative = discharging)
-    private var batteryTemperature = -1     // tenths of °C
+    private var batteryTemperature = -1     // tenths of degC
     private var batteryStatus = BatteryManager.BATTERY_STATUS_UNKNOWN
     private var batteryPlugged = 0          // 0 = unplugged
     private var powerWarningShown = false
@@ -112,14 +118,13 @@ class MainActivity : AppCompatActivity() {
 
     private val timeFormatter = SimpleDateFormat("HH:mm:ss", Locale.US)
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
-
+    // --- Lifecycle ---
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Initialize persistent file logger (prunes logs older than 7 days)
         AppLogger.init(this)
-        AppLogger.i(TAG, "onCreate — app starting")
+        AppLogger.i(TAG, "onCreate - app starting")
 
         // Prevent unhandled exceptions from crashing the whole system (some phones reboot)
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
@@ -160,10 +165,11 @@ class MainActivity : AppCompatActivity() {
         setupQuickSettings()
         setupPanels()
         setupLogViewer()
+        setupDebugConsole()
         registerUsbReceiver()
         registerBatteryReceiver()
 
-        AppLogger.i(TAG, "UI setup complete, looking for camera…")
+        AppLogger.i(TAG, "UI setup complete, looking for camera...")
 
         // If launched by USB_DEVICE_ATTACHED, the device is in the intent
         val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
@@ -177,25 +183,25 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Don't handle here — the debounced broadcast receiver will pick it up.
-        // Handling both would cause a duplicate-connect race.
+        // With singleTask, USB_DEVICE_ATTACHED arrives here instead of creating a new Activity.
         val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
         if (device != null && isP1Camera(device)) {
-            AppLogger.i(TAG, "onNewIntent for P1 camera — deferring to broadcast receiver")
+            AppLogger.i(TAG, "onNewIntent: USB attached ${device.deviceName} VID=0x${device.vendorId.toString(16)} PID=0x${device.productId.toString(16)}")
+            requestPermission(device)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        AppLogger.i(TAG, "onDestroy — app shutting down")
+        AppLogger.i(TAG, "onDestroy - app shutting down")
+        AppLogger.onNewEntry = null   // stop pushing to dead UI
         stopStreaming()
         scope.cancel()
         try { unregisterReceiver(usbReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(batteryReceiver) } catch (_: Exception) {}
     }
 
-    // ── USB permission & connection ───────────────────────────────────────────
-
+    // --- USB permission & connection ---
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             try {
@@ -205,40 +211,13 @@ class MainActivity : AppCompatActivity() {
                         val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
                         AppLogger.i(TAG, "USB permission result: granted=$granted device=${device?.deviceName}")
                         if (granted && device != null) {
-                            startCamera(device)
+                            scope.launch { connectCamera(device) }
                         } else {
                             AppLogger.w(TAG, "USB permission denied by user")
                             showStatus(getString(R.string.permission_denied), error = true)
                         }
                     }
-                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                        val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
-                        AppLogger.i(TAG, "USB attached: ${device?.deviceName} VID=0x${device?.vendorId?.toString(16)} PID=0x${device?.productId?.toString(16)}")
-                        if (device != null && isP1Camera(device)) {
-                            // Dedup: ignore if same device attached within BROADCAST_DEDUP_MS
-                            val now = SystemClock.elapsedRealtime()
-                            if (device.deviceName == lastAttachDeviceName &&
-                                now - lastAttachTime < BROADCAST_DEDUP_MS
-                            ) {
-                                AppLogger.w(TAG, "Ignoring duplicate attach for ${device.deviceName}")
-                                return
-                            }
-                            lastAttachDeviceName = device.deviceName
-                            lastAttachTime = now
-
-                            // Debounce: wait 1s and verify device still present
-                            scope.launch {
-                                delay(1000)
-                                val stillPresent = usbManager.deviceList.values.any { isP1Camera(it) }
-                                if (stillPresent) {
-                                    val freshDevice = usbManager.deviceList.values.first { isP1Camera(it) }
-                                    requestPermission(freshDevice)
-                                } else {
-                                    AppLogger.w(TAG, "Device gone after attach debounce")
-                                }
-                            }
-                        }
-                    }
+                    // USB_DEVICE_ATTACHED is handled by onNewIntent (singleTask launch mode)
                     UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                         val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
                         AppLogger.i(TAG, "USB detached: ${device?.deviceName}")
@@ -254,8 +233,8 @@ class MainActivity : AppCompatActivity() {
                             lastDetachDeviceName = device.deviceName
                             lastDetachTime = now
 
-                            // Hard cancel everything immediately — no recovery on dead handle
-                            forceDisconnect("detach broadcast")
+                            // Hard cancel everything immediately - no recovery on dead handle
+                            scope.launch { forceDisconnect("detach broadcast") }
                             showStatus(getString(R.string.disconnected))
                         }
                     }
@@ -271,8 +250,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── Battery / power monitoring ──────────────────────────────────────────
-
+    // --- Battery / power monitoring ---
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != Intent.ACTION_BATTERY_CHANGED) return
@@ -326,7 +304,7 @@ class MainActivity : AppCompatActivity() {
 
         // Warning conditions:
         // 1) Battery voltage dropped below 3.4V (danger zone for Li-ion)
-        // 2) Drain rate is very high (>3%/min — phone will die within ~30 min)
+        // 2) Drain rate is very high (>3%/min - phone will die within ~30 min)
         // 3) Battery level critically low while camera is active
         val lowVoltage = batteryVoltage in 1..3400
         val highDrain = batteryDrainRate > 3.0f && isDischarging
@@ -340,9 +318,9 @@ class MainActivity : AppCompatActivity() {
                 highDrain -> getString(R.string.power_warn_drain, batteryDrainRate)
                 else -> ""
             }
-            Log.w(TAG, "POWER WARNING: $reason (V=${batteryVoltage}mV, I=${batteryCurrentNow}µA, " +
+            Log.w(TAG, "POWER WARNING: $reason (V=${batteryVoltage}mV, I=${batteryCurrentNow}uA, " +
                     "level=$batteryLevel%, drain=${batteryDrainRate}%/min)")
-            AppLogger.w(TAG, "POWER WARNING: $reason (V=${batteryVoltage}mV I=${batteryCurrentNow}µA " +
+            AppLogger.w(TAG, "POWER WARNING: $reason (V=${batteryVoltage}mV I=${batteryCurrentNow}uA " +
                     "level=$batteryLevel% drain=${batteryDrainRate}%/min)")
             toast(reason)
         }
@@ -356,7 +334,7 @@ class MainActivity : AppCompatActivity() {
     private fun registerUsbReceiver() {
         val filter = IntentFilter().apply {
             addAction(ACTION_USB_PERMISSION)
-            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            // USB_DEVICE_ATTACHED handled via onNewIntent (singleTask), not broadcast
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -379,7 +357,7 @@ class MainActivity : AppCompatActivity() {
     private fun requestPermission(device: UsbDevice) {
         try {
             if (usbManager.hasPermission(device)) {
-                startCamera(device)
+                scope.launch { connectCamera(device) }
             } else {
                 val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
                     PendingIntent.FLAG_MUTABLE else 0
@@ -400,8 +378,7 @@ class MainActivity : AppCompatActivity() {
         device.vendorId == ThermalCameraDriver.VENDOR_ID &&
         device.productId == ThermalCameraDriver.PRODUCT_ID
 
-    // ── Camera lifecycle ──────────────────────────────────────────────────────
-
+    // --- Camera lifecycle ---
     private fun logPowerSnapshot(label: String) {
         try {
             // Read battery data directly from sticky intent if cached values are stale (-1)
@@ -432,89 +409,78 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var connectRetryCount = 0
-    private val MAX_CONNECT_RETRIES = 2
 
-    private fun startCamera(device: UsbDevice) {
-        // Bump generation and cancel any in-flight connect/stream
-        forceDisconnect("startCamera")
+    /**
+     * Single entry point for all connect attempts. Acquires the USB lifecycle
+     * mutex so that connect, disconnect, detach, and permission handling never
+     * overlap. No auto-retry - if it fails, it just reports the error.
+     */
+    private suspend fun connectCamera(device: UsbDevice) = usbLifecycleMutex.withLock {
+        // Tear down any previous connection inside the lock
+        teardownLocked("connectCamera")
+
         connectedDevice = device
         showStatus(getString(R.string.connecting))
         updateStatusDot(StatusState.CONNECTING)
-        AppLogger.i(TAG, "startCamera: ${device.deviceName} gen=$connectionGeneration " +
+
+        val myGeneration = connectionGeneration.incrementAndGet()
+        AppLogger.i(TAG, "connectCamera: ${device.deviceName} gen=$myGeneration " +
                 "(VID=0x${device.vendorId.toString(16)} PID=0x${device.productId.toString(16)})")
         logPowerSnapshot("pre-connect")
 
-        val myGeneration = connectionGeneration
+        val newDriver = ThermalCameraDriver(usbManager, device)
+        pendingDriver = newDriver
+        var connected = false
+        try {
+            // Check generation before blocking connect
+            if (connectionGeneration.get() != myGeneration) {
+                AppLogger.w(TAG, "Stale connect (gen $myGeneration != ${connectionGeneration.get()}), aborting")
+                return@withLock
+            }
+            AppLogger.i(TAG, "Calling driver.connect() [gen=$myGeneration]...")
+            withContext(Dispatchers.IO) { newDriver.connect() }
 
-        connectJob = scope.launch {
-            val newDriver = ThermalCameraDriver(usbManager, device)
-            pendingDriver = newDriver  // track so forceDisconnect can cancel it mid-init
-            var connected = false
-            try {
-                // Check generation before blocking connect
-                if (connectionGeneration != myGeneration) {
-                    AppLogger.w(TAG, "Stale connect (gen $myGeneration != $connectionGeneration), aborting")
-                    return@launch
-                }
-                AppLogger.i(TAG, "Calling driver.connect() [gen=$myGeneration]…")
-                withContext(Dispatchers.IO) { newDriver.connect() }
+            // Check generation AFTER connect - detach may have arrived while we blocked
+            if (connectionGeneration.get() != myGeneration) {
+                AppLogger.w(TAG, "Generation changed during connect ($myGeneration -> ${connectionGeneration.get()}), aborting")
+                try { newDriver.disconnect() } catch (_: Exception) {}
+                return@withLock
+            }
 
-                // Check generation AFTER connect — detach may have arrived while we blocked
-                if (connectionGeneration != myGeneration) {
-                    AppLogger.w(TAG, "Generation changed during connect ($myGeneration → $connectionGeneration), aborting")
-                    try { newDriver.disconnect() } catch (_: Exception) {}
-                    return@launch
-                }
-
-                driver = newDriver
-                pendingDriver = null  // now tracked as `driver`
-                connected = true
-                connectRetryCount = 0
-                logPowerSnapshot("post-connect")
-                AppLogger.i(TAG, "Camera connected [gen=$myGeneration] — starting stream")
-                resetDiagnostics()
-                showStreaming(true)
-                logPowerSnapshot("streaming-start")
-                launchStreamLoop(newDriver, myGeneration)
-            } catch (e: UsbConnectionException) {
-                if (connectionGeneration != myGeneration) return@launch
-                Log.e(TAG, "Camera connect failed: USB error", e)
-                AppLogger.e(TAG, "Camera connect failed: USB error", e)
-                logPowerSnapshot("connect-failed")
-                if (connectRetryCount < MAX_CONNECT_RETRIES) {
-                    connectRetryCount++
-                    AppLogger.i(TAG, "Retrying connection (attempt ${connectRetryCount + 1})…")
-                    showStatus("Retrying connection…")
-                    withContext(Dispatchers.IO) { delay(1000L * connectRetryCount) }
-                    if (connectionGeneration != myGeneration) return@launch
-                    val stillPresent = usbManager.deviceList.values.any { isP1Camera(it) }
-                    if (stillPresent) {
-                        val freshDevice = usbManager.deviceList.values.first { isP1Camera(it) }
-                        startCamera(freshDevice)
-                        return@launch
-                    } else {
-                        AppLogger.w(TAG, "Camera no longer present after failed connect")
-                    }
-                }
-                showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
-                updateStatusDot(StatusState.ERROR)
-            } catch (e: SecurityException) {
-                if (connectionGeneration != myGeneration) return@launch
-                Log.e(TAG, "Camera connect failed: permission error", e)
-                AppLogger.e(TAG, "Camera connect failed: permission error", e)
-                showStatus(getString(R.string.error_usb_permission), error = true)
-                updateStatusDot(StatusState.ERROR)
-            } catch (e: Exception) {
-                if (connectionGeneration != myGeneration) return@launch
-                Log.e(TAG, "Camera connect failed", e)
-                AppLogger.e(TAG, "Camera connect failed", e)
-                logPowerSnapshot("connect-failed")
-                showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
-                updateStatusDot(StatusState.ERROR)
-            } finally {
-                if (!connected) {
-                    try { newDriver.disconnect() } catch (_: Exception) {}
-                }
+            driver = newDriver
+            pendingDriver = null
+            connected = true
+            connectRetryCount = 0
+            logPowerSnapshot("post-connect")
+            AppLogger.i(TAG, "Camera connected [gen=$myGeneration] - starting stream")
+            resetDiagnostics()
+            showStreaming(true)
+            logPowerSnapshot("streaming-start")
+            launchStreamLoop(newDriver, myGeneration)
+        } catch (e: UsbConnectionException) {
+            if (connectionGeneration.get() != myGeneration) return@withLock
+            Log.e(TAG, "Camera connect failed: USB error", e)
+            AppLogger.e(TAG, "Camera connect failed: USB error", e)
+            logPowerSnapshot("connect-failed")
+            showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
+            updateStatusDot(StatusState.ERROR)
+        } catch (e: SecurityException) {
+            if (connectionGeneration.get() != myGeneration) return@withLock
+            Log.e(TAG, "Camera connect failed: permission error", e)
+            AppLogger.e(TAG, "Camera connect failed: permission error", e)
+            showStatus(getString(R.string.error_usb_permission), error = true)
+            updateStatusDot(StatusState.ERROR)
+        } catch (e: Exception) {
+            if (connectionGeneration.get() != myGeneration) return@withLock
+            Log.e(TAG, "Camera connect failed", e)
+            AppLogger.e(TAG, "Camera connect failed", e)
+            logPowerSnapshot("connect-failed")
+            showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
+            updateStatusDot(StatusState.ERROR)
+        } finally {
+            if (!connected) {
+                pendingDriver = null
+                try { newDriver.disconnect() } catch (_: Exception) {}
             }
         }
     }
@@ -528,15 +494,15 @@ class MainActivity : AppCompatActivity() {
             AppLogger.i(TAG, "Stream loop started [gen=$generation]")
 
             try {
-                while (isActive && d.isStreaming() && connectionGeneration == generation) {
+                while (isActive && d.isStreaming() && connectionGeneration.get() == generation) {
                     val now = SystemClock.elapsedRealtime()
 
                     try {
                         val rawFrame = d.readFrame()
 
                         // Generation check after potentially blocking bulkTransfer
-                        if (connectionGeneration != generation) {
-                            AppLogger.w(TAG, "Stale stream gen=$generation (now=$connectionGeneration), exiting")
+                        if (connectionGeneration.get() != generation) {
+                            AppLogger.w(TAG, "Stale stream gen=$generation (now=${connectionGeneration.get()}), exiting")
                             return@launch
                         }
 
@@ -579,26 +545,29 @@ class MainActivity : AppCompatActivity() {
                             lastPowerLogTime = now
                             AppLogger.i(TAG, "Stream [gen=$generation]: " +
                                     "fps=${String.format("%.1f", currentFps)}, " +
-                                    "frames=$frameCount, dropped=$droppedFrames")
+                                    "frames=$frameCount, dropped=$droppedFrames, " +
+                                    "center=${FrameParser.formatTemp(frame.centerTemp())}")
                             AppLogger.power(batteryLevel, batteryVoltage, batteryCurrentNow,
                                 batteryTemperature, batteryDrainRate, batteryPlugged != 0)
                         }
 
                         withContext(Dispatchers.Main) {
-                            if (connectionGeneration != generation) return@withContext
+                            if (connectionGeneration.get() != generation) return@withContext
                             binding.thermalView.updateFrame(frame)
                             updateTemperatureHud(frame)
                             updateFpsDisplay()
                             updateDiagnosticsIfVisible()
                         }
 
-                        // Brief yield to keep USB throughput from hitting max continuously.
-                        // Without this the phone's PMIC can trigger overcurrent protection.
-                        delay(5)
+                        // Throttle USB bus to ~8-9 fps to prevent Samsung A10's USB host
+                        // controller from crashing under sustained bulk transfer load.
+                        // The camera produces ~25 fps but the A10's PMIC/EHCI can't sustain
+                        // continuous 77KB bulk reads without eventually triggering a kernel panic.
+                        delay(100)
 
                     } catch (e: UsbConnectionException) {
-                        // First USB failure → close everything, no recovery commands
-                        if (connectionGeneration != generation) return@launch
+                        // First USB failure -> close everything, no recovery commands
+                        if (connectionGeneration.get() != generation) return@launch
                         Log.e(TAG, "USB connection lost [gen=$generation]", e)
                         AppLogger.e(TAG, "USB connection lost [gen=$generation]", e)
                         logPowerSnapshot("stream-lost")
@@ -612,18 +581,18 @@ class MainActivity : AppCompatActivity() {
                         }
                         return@launch
                     } catch (e: Exception) {
-                        if (connectionGeneration != generation) return@launch
+                        if (connectionGeneration.get() != generation) return@launch
                         Log.w(TAG, "Frame read error [gen=$generation]", e)
                         droppedFrames++
                         delay(100)
                     }
                 }
 
-                if (connectionGeneration != generation) {
+                if (connectionGeneration.get() != generation) {
                     AppLogger.i(TAG, "Stream loop exiting: stale generation $generation")
                 }
             } catch (e: Exception) {
-                if (connectionGeneration != generation) return@launch
+                if (connectionGeneration.get() != generation) return@launch
                 Log.e(TAG, "Stream loop terminated unexpectedly [gen=$generation]", e)
                 AppLogger.e(TAG, "Stream loop terminated unexpectedly [gen=$generation]", e)
                 withContext(Dispatchers.Main) {
@@ -641,12 +610,18 @@ class MainActivity : AppCompatActivity() {
     /**
      * Hard-cancel everything: bump generation, cancel all jobs, disconnect driver.
      * After this, no old coroutine can touch the USB handle.
+     * Acquires the USB lifecycle mutex to prevent overlap with connectCamera.
      */
-    private fun forceDisconnect(reason: String) {
-        val gen = ++connectionGeneration
-        AppLogger.i(TAG, "forceDisconnect($reason) — generation now $gen")
-        connectJob?.cancel()
-        connectJob = null
+    private suspend fun forceDisconnect(reason: String) = usbLifecycleMutex.withLock {
+        teardownLocked(reason)
+    }
+
+    /**
+     * Inner teardown that MUST only be called while holding [usbLifecycleMutex].
+     */
+    private fun teardownLocked(reason: String) {
+        val gen = connectionGeneration.incrementAndGet()
+        AppLogger.i(TAG, "teardownLocked($reason) - generation now $gen")
         streamJob?.cancel()
         streamJob = null
         // Cancel pending driver that hasn't been assigned to `driver` yet
@@ -671,7 +646,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopStreaming() {
-        forceDisconnect("stopStreaming")
+        // Called from onDestroy - use teardownLocked directly (no coroutine scope available).
+        // This is safe because onDestroy runs after all other lifecycle callbacks.
+        teardownLocked("stopStreaming")
     }
 
     private fun resetDiagnostics() {
@@ -683,11 +660,10 @@ class MainActivity : AppCompatActivity() {
         lastFpsTime = streamStartTime
     }
 
-    // ── UI setup ──────────────────────────────────────────────────────────────
-
+    // --- UI setup ---
     private fun setupCameraControls() {
         binding.thermalView.onTouchTemp = { temp ->
-            binding.tvTouch.text = "⊕ ${FrameParser.formatTemp(temp)}"
+            binding.tvTouch.text = "+ ${FrameParser.formatTemp(temp)}"
             binding.tvTouch.visibility = View.VISIBLE
         }
     }
@@ -765,14 +741,37 @@ class MainActivity : AppCompatActivity() {
         binding.btnExportLogs.setOnClickListener {
             exportLogs()
         }
+        binding.btnClearLogs.setOnClickListener {
+            AppLogger.clearLogs()
+            binding.tvLogContent.text = ""
+            binding.tvDebugConsole.text = ""
+            toast(getString(R.string.log_cleared))
+        }
+    }
+
+    private fun setupDebugConsole() {
+        // Show last 10 lines from ring buffer on startup
+        binding.tvDebugConsole.text = AppLogger.getTailLines(10)
+
+        // Register live push: every new log entry immediately appends a line
+        AppLogger.onNewEntry = { entry ->
+            runOnUiThread {
+                val current = binding.tvDebugConsole.text.toString()
+                val lines = if (current.isEmpty()) emptyList() else current.lines()
+                val kept = lines.takeLast(9)  // keep 9, new entry will be the 10th
+                binding.tvDebugConsole.text = (kept + entry).joinToString("\n")
+            }
+        }
     }
 
     private fun showLogViewer() {
         closeAllPanels()
         scope.launch(Dispatchers.IO) {
             val content = AppLogger.readLogs()
+            // Keep only the last 100 lines so the viewer opens instantly
+            val tail = content.lines().takeLast(100).joinToString("\n")
             withContext(Dispatchers.Main) {
-                binding.tvLogContent.text = content
+                binding.tvLogContent.text = tail
                 binding.logViewerOverlay.visibility = View.VISIBLE
                 // Scroll to bottom
                 binding.logScrollView.post {
@@ -784,7 +783,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun exportLogs() {
         scope.launch(Dispatchers.IO) {
-            val content = AppLogger.readLogs()
+            val content = AppLogger.readLogs().sanitizeLogText()
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val fileName = "ThermalP1_log_$stamp.log"
 
@@ -795,13 +794,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             withContext(Dispatchers.Main) {
-                if (success) {
-                    toast(getString(R.string.log_exported))
-                    // Also offer to share
-                    sharePlainText(content, fileName)
-                } else {
-                    toast(getString(R.string.log_export_failed))
-                }
+                if (success) toast(getString(R.string.log_exported))
+                else toast(getString(R.string.log_export_failed))
             }
         }
     }
@@ -844,17 +838,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun sharePlainText(content: String, @Suppress("UNUSED_PARAMETER") fileName: String) {
-        try {
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, "ThermalP1 Logs")
-                putExtra(Intent.EXTRA_TEXT, content)
+    private fun String.sanitizeLogText(): String {
+        val sb = StringBuilder(length)
+        for (c in this) {
+            when (c) {
+                '\u00b5' -> sb.append('u')    // micro sign µ
+                '\u00b0' -> sb.append('d')    // degree sign °
+                '\u2014', '\u2013' -> sb.append('-')  // em/en dash
+                '\u2192' -> sb.append('-')    // arrow
+                '\u2026' -> sb.append("...")  // ellipsis
+                '\u2295' -> sb.append('+')    // circled plus
+                '\u2193' -> sb.append('v')    // down arrow
+                '\u2191' -> sb.append('^')    // up arrow
+                else -> if (c.code < 128) sb.append(c) else sb.append('?')
             }
-            startActivity(Intent.createChooser(shareIntent, "Share log"))
-        } catch (e: Exception) {
-            Log.w(TAG, "Share intent failed", e)
         }
+        return sb.toString()
     }
 
     private fun setupSettingsPanel() {
@@ -907,8 +906,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── Mode switching ────────────────────────────────────────────────────────
-
+    // --- Mode switching ---
     private fun setMode(isVideo: Boolean) {
         videoMode = isVideo
         if (isVideo) {
@@ -955,8 +953,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    // ── Gain & colormap ──────────────────────────────────────────────────────
-
+    // --- Gain & colormap ---
     private fun toggleGain() {
         gainHigh = !gainHigh
         val isHigh = gainHigh
@@ -986,8 +983,7 @@ class MainActivity : AppCompatActivity() {
         binding.settingsPanel.rgColormap.check(rbId)
     }
 
-    // ── Panel management ─────────────────────────────────────────────────────
-
+    // --- Panel management ---
     private enum class Panel { SETTINGS, CALIBRATION, DIAGNOSTICS }
     private var openPanel: Panel? = null
 
@@ -1062,8 +1058,7 @@ class MainActivity : AppCompatActivity() {
             .start()
     }
 
-    // ── Panel content sync ───────────────────────────────────────────────────
-
+    // --- Panel content sync ---
     private fun syncSettingsPanel() {
         val rbId = when (binding.thermalView.colormap) {
             ColormapManager.Colormap.IRONBOW -> R.id.rbIronbow
@@ -1131,7 +1126,7 @@ class MainActivity : AppCompatActivity() {
         val frame = binding.thermalView.lastFramePublic
         if (frame != null) {
             binding.diagnosticsPanel.tvDiagSceneRange.text =
-                "${FrameParser.formatTemp(frame.minTemp())} – ${FrameParser.formatTemp(frame.maxTemp())}"
+                "${FrameParser.formatTemp(frame.minTemp())} - ${FrameParser.formatTemp(frame.maxTemp())}"
             binding.diagnosticsPanel.tvDiagCenter.text = FrameParser.formatTemp(frame.centerTemp())
         }
 
@@ -1192,7 +1187,7 @@ class MainActivity : AppCompatActivity() {
         // Battery temperature
         if (batteryTemperature > 0) {
             val tempC = batteryTemperature / 10f
-            binding.diagnosticsPanel.tvDiagBatteryTemp.text = "%.1f °C".format(tempC)
+            binding.diagnosticsPanel.tvDiagBatteryTemp.text = "%.1f degC".format(tempC)
             binding.diagnosticsPanel.tvDiagBatteryTemp.setTextColor(
                 getColor(when {
                     tempC >= 45 -> R.color.status_error
@@ -1235,8 +1230,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── UI state management ──────────────────────────────────────────────────
-
+    // --- UI state management ---
     private enum class StatusState { CONNECTED, DISCONNECTED, CONNECTING, ERROR }
 
     private fun updateStatusDot(state: StatusState) {
@@ -1289,12 +1283,11 @@ class MainActivity : AppCompatActivity() {
         binding.btnQuickColormap.alpha = if (enabled) 1.0f else 0.4f
     }
 
-    // ── Temperature & FPS display ────────────────────────────────────────────
-
+    // --- Temperature & FPS display ---
     private fun updateTemperatureHud(frame: com.github.opentmp1.camera.ParsedFrame) {
         binding.tvCenterLarge.text = FrameParser.formatTemp(frame.centerTemp())
-        binding.tvMin.text = "↓ ${FrameParser.formatTemp(frame.minTemp())}"
-        binding.tvMax.text = "↑ ${FrameParser.formatTemp(frame.maxTemp())}"
+        binding.tvMin.text = "v ${FrameParser.formatTemp(frame.minTemp())}"
+        binding.tvMax.text = "^ ${FrameParser.formatTemp(frame.maxTemp())}"
     }
 
     private fun updateFpsDisplay() {
@@ -1313,8 +1306,7 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
-    // ── Screenshot ────────────────────────────────────────────────────────────
-
+    // --- Screenshot ---
     private fun saveScreenshot() {
         AppLogger.i(TAG, "Screenshot capture")
         val bmp = binding.thermalView.captureBitmap()

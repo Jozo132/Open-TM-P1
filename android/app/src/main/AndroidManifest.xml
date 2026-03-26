@@ -23,6 +23,7 @@
             android:name=".MainActivity"
             android:configChanges="keyboardHidden"
             android:exported="true"
+            android:launchMode="singleTask"
             android:screenOrientation="fullSensor">
 
             <intent-filter>
