@@ -151,7 +151,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:background="@drawable/pill_bg"
-            android:drawableStart="@drawable/status_indicator_connected"
+            android:drawableStart="@drawable/status_indicator_disconnected"
             android:drawablePadding="6dp"
             android:paddingStart="10dp"
             android:paddingEnd="10dp"
