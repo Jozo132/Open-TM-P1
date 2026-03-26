@@ -36,6 +36,7 @@
     <!-- Status colors -->
     <color name="status_ok">#FF4CAF50</color>
     <color name="status_error">#FFFF5252</color>
+    <color name="status_warning">#FFFFAB40</color>
     <color name="status_connecting">#FFFFC107</color>
     <color name="status_streaming">#FF4CAF50</color>
 

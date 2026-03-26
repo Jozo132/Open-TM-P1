@@ -109,6 +109,12 @@ data class ParsedFrame(
     /** Temperature at the center pixel. */
     fun centerTemp(): Float = tempAt(width / 2, height / 2)
 
+    /**
+     * Check if the frame contains plausible thermal data.
+     * A raw value of 0 decodes to -273.15°C (absolute zero), indicating garbage/empty data.
+     */
+    fun isPlausible(): Boolean = centerTemp() > -200f
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is ParsedFrame) return false

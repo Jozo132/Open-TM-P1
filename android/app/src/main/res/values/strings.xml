@@ -7,6 +7,7 @@
     <string name="camera_not_found">No camera connected</string>
     <string name="camera_not_found_hint">Connect a Thermal Master P1 camera via USB OTG</string>
     <string name="permission_denied">USB permission denied. Please grant permission to use the camera.</string>
+    <string name="requesting_permission">Requesting USB permission…</string>
     <string name="connecting">Connecting…</string>
     <string name="streaming">Streaming</string>
     <string name="disconnected">Disconnected</string>
@@ -95,6 +96,27 @@
     <string name="diagnostics_frame_size">Frame Size</string>
     <string name="diagnostics_not_connected">Not connected</string>
     <string name="diagnostics_na">N/A</string>
+    <string name="diagnostics_power">Power</string>
+    <string name="diagnostics_battery_level">Battery Level</string>
+    <string name="diagnostics_battery_voltage">Voltage</string>
+    <string name="diagnostics_current_draw">Current</string>
+    <string name="diagnostics_battery_temp">Battery Temp</string>
+    <string name="diagnostics_drain_rate">Drain Rate</string>
+    <string name="diagnostics_charging">Charging</string>
+
+    <!-- Power warnings -->
+    <string name="power_warn_voltage">⚠ Low battery voltage: %.2fV — camera may cause shutdown</string>
+    <string name="power_warn_critical">⚠ Battery critically low (%d%%) — camera drawing too much power</string>
+    <string name="power_warn_drain">⚠ High power drain: %.1f%%/min — camera may overwhelm USB power</string>
+
+    <!-- Log viewer -->
+    <string name="diagnostics_logs">Logs</string>
+    <string name="diagnostics_view_logs">View Logs</string>
+    <string name="log_viewer_title">Application Logs</string>
+    <string name="log_export">Export</string>
+    <string name="log_exported">Log exported to Downloads</string>
+    <string name="log_export_failed">Failed to export log</string>
+    <string name="log_shared">Sharing log…</string>
 
     <!-- Content descriptions -->
     <string name="cd_settings">Settings</string>

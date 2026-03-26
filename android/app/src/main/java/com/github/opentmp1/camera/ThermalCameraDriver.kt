@@ -7,6 +7,7 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.util.Log
+import com.github.opentmp1.AppLogger
 
 /**
  * USB driver for the Thermal Master P1 camera.
@@ -75,7 +76,10 @@ class ThermalCameraDriver(
         private const val ENDPOINT_IN = 0x81
 
         /** Number of consecutive frame read failures before auto-disconnect. */
-        const val MAX_CONSECUTIVE_ERRORS = 10
+        const val MAX_CONSECUTIVE_ERRORS = 30
+
+        /** Threshold to attempt a soft reset (re-send stream command) before giving up. */
+        const val SOFT_RESET_THRESHOLD = 10
     }
 
     private var connection: UsbDeviceConnection? = null
@@ -85,6 +89,7 @@ class ThermalCameraDriver(
     private var bulkIn: UsbEndpoint? = null
 
     @Volatile private var streaming = false
+    @Volatile var cancelled = false
 
     /** Tracks consecutive frame read failures for auto-disconnect. */
     @Volatile var consecutiveErrors = 0
@@ -98,13 +103,16 @@ class ThermalCameraDriver(
      */
     fun connect() {
         Log.i(TAG, "Connecting to P1 camera…")
+        AppLogger.i(TAG, "Connecting to P1 camera…")
 
         // Phase 1: Open the USB device
         try {
             connection = usbManager.openDevice(device)
         } catch (e: SecurityException) {
+            AppLogger.e(TAG, "USB permission revoked/denied", e)
             throw UsbConnectionException("USB permission was revoked or denied", e)
         } catch (e: Exception) {
+            AppLogger.e(TAG, "Failed to open USB device", e)
             throw UsbConnectionException("Failed to open USB device: ${e.message}", e)
         }
         if (connection == null) {
@@ -200,6 +208,7 @@ class ThermalCameraDriver(
 
     private fun initSequence(conn: UsbDeviceConnection) {
         // 1. Send initial start-stream command
+        AppLogger.i(TAG, "Init phase 1: sending start-stream command")
         sendCommand(conn, CMD_START_STREAM)
         readStatus(conn)
         val resp1 = readResponse(conn, 1)
@@ -207,9 +216,12 @@ class ThermalCameraDriver(
         Log.d(TAG, "Init start_stream response: 0x${resp1[0].toInt().and(0xFF).toString(16)}")
 
         // 2. Brief pause
+        AppLogger.i(TAG, "Init phase 2: 1s pause")
         Thread.sleep(1000)
+        if (cancelled) throw UsbConnectionException("Connection cancelled during init")
 
         // 3. Enable streaming interface (alt setting 1)
+        AppLogger.i(TAG, "Init phase 3: activating streaming interface")
         val alt1 = iface1Alt1 ?: throw UsbConnectionException(
             "Streaming interface lost during initialization"
         )
@@ -232,23 +244,32 @@ class ThermalCameraDriver(
         }
 
         // 4. Wait for camera ready
+        AppLogger.i(TAG, "Init phase 4: 2s wait for camera ready")
         Thread.sleep(2000)
+        if (cancelled) throw UsbConnectionException("Connection cancelled during init")
 
         // 5. Discard any partial data waiting in the pipe
+        AppLogger.i(TAG, "Init phase 5: draining stale buffers")
         try {
             val dummy = ByteArray(TRANSFER1_SIZE)
-            val discardResult = conn.bulkTransfer(bulkIn, dummy, dummy.size, 100)
-            Log.d(TAG, "Discard phase: got $discardResult bytes")
+            var totalDiscarded = 0
+            for (i in 0 until 5) {
+                val n = conn.bulkTransfer(bulkIn, dummy, dummy.size, 200)
+                if (n <= 0) break
+                totalDiscarded += n
+            }
+            Log.d(TAG, "Discard phase: drained $totalDiscarded bytes")
         } catch (e: Exception) {
             Log.d(TAG, "Discard phase: ${e.message} (non-fatal)")
         }
 
         // 6. Final start stream
+        AppLogger.i(TAG, "Init phase 6: final start-stream command")
         sendCommand(conn, CMD_START_STREAM)
         readStatus(conn)
         val resp2 = readResponse(conn, 1)
         readStatus(conn)
-        Log.i(TAG, "Camera ready. Stream response: 0x${resp2[0].toInt().and(0xFF).toString(16)}")
+        AppLogger.i(TAG, "Camera ready — streaming enabled")
 
         consecutiveErrors = 0
         streaming = true
@@ -273,6 +294,7 @@ class ThermalCameraDriver(
             if (n1 <= 0) {
                 consecutiveErrors++
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    AppLogger.e(TAG, "Lost camera: $consecutiveErrors consecutive read failures")
                     throw UsbConnectionException(
                         "Lost communication with camera ($consecutiveErrors consecutive read failures)"
                     )
@@ -295,14 +317,47 @@ class ThermalCameraDriver(
         return buf1.copyOfRange(MARKER_SIZE, TRANSFER1_SIZE)
     }
 
+    /**
+     * Attempt to recover streaming without a full disconnect/reconnect.
+     * Re-sends the start-stream command and drains stale buffers.
+     * @return true if the reset succeeded and streaming may resume.
+     */
+    fun softReset(): Boolean {
+        val conn = connection ?: return false
+        val ep = bulkIn ?: return false
+        AppLogger.i(TAG, "Attempting soft reset (re-sending stream command)…")
+        return try {
+            // Drain stale data
+            val dummy = ByteArray(TRANSFER1_SIZE)
+            for (i in 0 until 3) {
+                val n = conn.bulkTransfer(ep, dummy, dummy.size, 100)
+                if (n <= 0) break
+            }
+            // Re-send start-stream command
+            sendCommand(conn, CMD_START_STREAM)
+            readStatus(conn)
+            readResponse(conn, 1)
+            readStatus(conn)
+            Thread.sleep(500)
+            consecutiveErrors = 0
+            AppLogger.i(TAG, "Soft reset succeeded")
+            true
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Soft reset failed", e)
+            false
+        }
+    }
+
     /** Trigger the shutter / NUC calibration. */
     fun triggerShutter() {
         val conn = connection ?: return
         try {
+            AppLogger.i(TAG, "Sending shutter/NUC command")
             sendCommand(conn, CMD_SHUTTER)
             readStatus(conn)
         } catch (e: Exception) {
             Log.e(TAG, "Shutter command failed", e)
+            AppLogger.e(TAG, "Shutter command failed", e)
         }
     }
 
@@ -332,6 +387,8 @@ class ThermalCameraDriver(
      * Stop streaming and release all USB resources.
      */
     fun disconnect() {
+        AppLogger.i(TAG, "Disconnecting camera")
+        cancelled = true
         streaming = false
         try {
             val conn = connection ?: return

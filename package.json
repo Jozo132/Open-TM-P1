@@ -4,7 +4,7 @@
   "private": true,
   "description": "Open-TM-P1 Thermal Camera Android App",
   "scripts": {
-    "build": "set \"JAVA_HOME=C:\\Program Files\\Microsoft\\jdk-17.0.18.8-hotspot\" && set \"ANDROID_HOME=%LOCALAPPDATA%\\Android\\Sdk\" && cd android && gradlew.bat assembleDebug",
+    "build": "set \"JAVA_HOME=%LOCALAPPDATA%\\Programs\\jdk-17.0.14+7\" && set \"ANDROID_HOME=%LOCALAPPDATA%\\Android\\Sdk\" && cd android && gradlew.bat assembleDebug",
     "deploy": "\"%LOCALAPPDATA%\\Android\\Sdk\\platform-tools\\adb\" install -r android/app/build/outputs/apk/debug/app-debug.apk",
     "deploy:ota": "\"%LOCALAPPDATA%\\Android\\Sdk\\platform-tools\\adb\" connect %npm_config_device% && \"%LOCALAPPDATA%\\Android\\Sdk\\platform-tools\\adb\" -s %npm_config_device% install -r android/app/build/outputs/apk/debug/app-debug.apk",
     "start": "\"%LOCALAPPDATA%\\Android\\Sdk\\platform-tools\\adb\" shell am start -n com.github.opentmp1/.MainActivity"

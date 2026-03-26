@@ -362,6 +362,181 @@
                     android:text="77,440 bytes"
                     style="@style/PanelValue" />
             </LinearLayout>
+            <!-- Divider -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@drawable/divider_horizontal"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Power Section -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_power"
+                style="@style/PanelSectionHeader"
+                android:layout_marginBottom="12dp" />
+
+            <!-- Battery level row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="6dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/diagnostics_battery_level"
+                    style="@style/PanelLabel" />
+                <TextView
+                    android:id="@+id/tvDiagBatteryLevel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/diagnostics_na"
+                    style="@style/PanelValue" />
+            </LinearLayout>
+
+            <!-- Battery voltage row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="6dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/diagnostics_battery_voltage"
+                    style="@style/PanelLabel" />
+                <TextView
+                    android:id="@+id/tvDiagBatteryVoltage"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/diagnostics_na"
+                    style="@style/PanelValue" />
+            </LinearLayout>
+
+            <!-- Current draw row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="6dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/diagnostics_current_draw"
+                    style="@style/PanelLabel" />
+                <TextView
+                    android:id="@+id/tvDiagCurrentDraw"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/diagnostics_na"
+                    style="@style/PanelValue" />
+            </LinearLayout>
+
+            <!-- Battery temperature row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="6dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/diagnostics_battery_temp"
+                    style="@style/PanelLabel" />
+                <TextView
+                    android:id="@+id/tvDiagBatteryTemp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/diagnostics_na"
+                    style="@style/PanelValue" />
+            </LinearLayout>
+
+            <!-- Drain rate row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="6dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/diagnostics_drain_rate"
+                    style="@style/PanelLabel" />
+                <TextView
+                    android:id="@+id/tvDiagDrainRate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/diagnostics_na"
+                    style="@style/PanelValue" />
+            </LinearLayout>
+
+            <!-- Charging status row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="6dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/diagnostics_charging"
+                    style="@style/PanelLabel" />
+                <TextView
+                    android:id="@+id/tvDiagCharging"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/diagnostics_na"
+                    style="@style/PanelValue" />
+            </LinearLayout>
+
+            <!-- Divider -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@drawable/divider_horizontal"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Logs Section -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_logs"
+                style="@style/PanelSectionHeader"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/tvDiagLogSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_na"
+                style="@style/PanelBody"
+                android:layout_marginBottom="12dp" />
+
+            <Button
+                android:id="@+id/btnViewLogs"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:text="@string/diagnostics_view_logs"
+                android:textSize="13sp"
+                android:textColor="@color/text_primary"
+                android:backgroundTint="@color/panel_header_bg"
+                android:textAllCaps="false" />
 
         </LinearLayout>
     </ScrollView>
