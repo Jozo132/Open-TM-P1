@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        USB device filter for the Thermal Master P1 camera.
+        VID 0x3474 = 13428 decimal
+        PID 0x45C2 = 17858 decimal
+    -->
+    <usb-device vendor-id="13428" product-id="17858" />
+</resources>

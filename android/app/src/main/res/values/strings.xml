@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Open TM-P1</string>
+    <string name="connect_camera">Connect Camera</string>
+    <string name="camera_not_found">Camera not found. Please connect the Thermal Master P1 via USB.</string>
+    <string name="permission_denied">USB permission denied. Please grant permission to use the camera.</string>
+    <string name="connecting">Connecting…</string>
+    <string name="streaming">Streaming</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="error_prefix">Error: </string>
+    <string name="btn_shutter">Shutter</string>
+    <string name="btn_gain">Gain: High</string>
+    <string name="btn_colormap">Colormap</string>
+    <string name="btn_screenshot">Screenshot</string>
+    <string name="screenshot_saved">Screenshot saved to Gallery</string>
+    <string name="screenshot_failed">Failed to save screenshot</string>
+    <string name="center_temp">Center: --.--°C</string>
+    <string name="min_temp">Min: --.--°C</string>
+    <string name="max_temp">Max: --.--°C</string>
+    <string name="touch_temp">Touch: --.--°C</string>
+    <string name="shutter_triggered">Shutter triggered</string>
+    <string name="gain_high">Gain: High (-20°C to 150°C)</string>
+    <string name="gain_low">Gain: Low (0°C to 550°C)</string>
+</resources>
