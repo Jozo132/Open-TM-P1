@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Foreground for the adaptive launcher icon: simplified thermal camera symbol -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Camera body -->
+    <path
+        android:fillColor="#FFFF6600"
+        android:pathData="M18,32 L18,76 L90,76 L90,32 Z" />
+
+    <!-- Lens outer ring -->
+    <path
+        android:fillColor="#FF220033"
+        android:pathData="M54,54 m-22,0 a22,22 0 1,0 44,0 a22,22 0 1,0 -44,0" />
+
+    <!-- Lens inner (hot zone) -->
+    <path
+        android:fillColor="#FFFF3300"
+        android:pathData="M54,54 m-14,0 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0" />
+
+    <!-- Lens center dot -->
+    <path
+        android:fillColor="#FFFFFF00"
+        android:pathData="M54,54 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+</vector>
