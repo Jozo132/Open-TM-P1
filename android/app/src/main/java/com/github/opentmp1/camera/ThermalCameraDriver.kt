@@ -182,18 +182,16 @@ class ThermalCameraDriver(
                     "Another app may be using the camera."
                 )
             }
-        } catch (e: UsbConnectionException) {
-            throw e
         } catch (e: Exception) {
+            if (e is UsbConnectionException) throw e
             throw UsbConnectionException("Failed to claim USB interfaces: ${e.message}", e)
         }
 
         // Phase 4: Run initialization sequence
         try {
             initSequence(conn)
-        } catch (e: UsbConnectionException) {
-            throw e
         } catch (e: Exception) {
+            if (e is UsbConnectionException) throw e
             throw UsbConnectionException(
                 "Camera initialization failed: ${e.message}", e
             )

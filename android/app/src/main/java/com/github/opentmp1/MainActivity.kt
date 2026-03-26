@@ -246,9 +246,11 @@ class MainActivity : AppCompatActivity() {
 
         scope.launch {
             val newDriver = ThermalCameraDriver(usbManager, device)
+            var connected = false
             try {
                 withContext(Dispatchers.IO) { newDriver.connect() }
                 driver = newDriver
+                connected = true
                 resetDiagnostics()
                 showStreaming(true)
                 launchStreamLoop(newDriver)
@@ -256,17 +258,18 @@ class MainActivity : AppCompatActivity() {
                 Log.e(TAG, "Camera connect failed: USB error", e)
                 showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
                 updateStatusDot(StatusState.ERROR)
-                try { newDriver.disconnect() } catch (_: Exception) {}
             } catch (e: SecurityException) {
                 Log.e(TAG, "Camera connect failed: permission error", e)
                 showStatus(getString(R.string.error_usb_permission), error = true)
                 updateStatusDot(StatusState.ERROR)
-                try { newDriver.disconnect() } catch (_: Exception) {}
             } catch (e: Exception) {
                 Log.e(TAG, "Camera connect failed", e)
                 showStatus("${getString(R.string.error_prefix)}${e.message}", error = true)
                 updateStatusDot(StatusState.ERROR)
-                try { newDriver.disconnect() } catch (_: Exception) {}
+            } finally {
+                if (!connected) {
+                    try { newDriver.disconnect() } catch (_: Exception) {}
+                }
             }
         }
     }
